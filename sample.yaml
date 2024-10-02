@@ -1,0 +1,56 @@
+select_columns: 
+  - "a.col"
+  - "b.col"
+  - "c.col"
+  - "a.bus"
+table_name: "customers a"
+where_conditions: "a.col > 30"
+join_conditions:
+  - join_type: "INNER"
+    join_table: "orders o"
+    join_condition: "a.id = o.customer_id"
+  - join_type: "LEFT"
+    join_table: "payments p"
+    join_condition: "a.id = p.customer_id"
+  - join_type: "RIGHT"
+    join_table: "accounts acc"
+    join_condition: "a.account_id = acc.account_id"
+group_by: 
+  - "a.col"
+  - "b.col"
+  - "a.bus"
+order_by: 
+  - "a.col DESC"
+  - "b.col ASC"
+unions:
+  - select_columns: 
+      - "x.col"
+      - "y.col"
+    table_name: "another_table x"
+    where_conditions: "x.col < 30"
+    join_conditions:
+      - join_type: "INNER"
+        join_table: "join_table jt"
+        join_condition: "x.id = jt.id"
+      - join_type: "LEFT"
+        join_table: "more_joins mj"
+        join_condition: "x.id = mj.x_id"
+    group_by: 
+      - "x.col"
+      - "y.col"
+    order_by: 
+      - "x.col ASC"
+      - "y.col DESC"
+  - select_columns: 
+      - "z.col"
+      - "z.col"
+    table_name: "another_table z"
+    where_conditions: "z.col < 30"
+    join_conditions:
+      - join_type: "LEFT"
+        join_table: "left_table lt"
+        join_condition: "z.id = lt.id"
+    group_by: 
+      - "z.col"
+    order_by: 
+      - "z.col DESC"
