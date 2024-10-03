@@ -8,7 +8,47 @@ class LineLoader(yaml.SafeLoader):
         mapping['__line__'] = node.start_mark.line + 1  # Capture line number
         return mapping
 
-# Define the validation function for YAML
+# Helper method to validate strings
+def validate_string(value, field_name, line, logger):
+    if not isinstance(value, str) or not value.strip():
+        logger.error(f"Validation Error: Field '{field_name}' must be a non-empty string at line {line}.")
+        return False
+    return True
+
+# Helper method to validate lists (strings or dictionaries)
+def validate_list(items, field_name, logger):
+    for idx, item in enumerate(items):
+        if isinstance(item, str):
+            # Validate non-empty string
+            line = items.get('__line__', 'Unknown')
+            if not validate_string(item, f"{field_name}[{idx}]", line, logger):
+                return False
+        elif isinstance(item, dict):
+            line = item.get('__line__', 'Unknown')
+            if field_name == 'join_conditions':
+                # Handle CROSS JOIN or regular join validation in lists of dicts
+                join_type = item.get('join_type', '').upper()
+                if join_type in ["CROSS", "CROSS JOIN"]:
+                    if 'join_condition' in item:
+                        logger.error(f"Validation Error: CROSS JOIN at {field_name}[{idx}] should not have 'join_condition' at line {line}.")
+                        return False
+                    if not validate_string(item.get('join_table', ''), 'join_table', line, logger):
+                        return False
+                else:
+                    if not validate_string(item.get('join_table', ''), 'join_table', line, logger):
+                        return False
+                    if not validate_string(item.get('join_condition', ''), 'join_condition', line, logger):
+                        return False
+            else:
+                logger.error(f"Validation Error: Unexpected dictionary structure in field '{field_name}' at index {idx}.")
+                return False
+        else:
+            line = items.get('__line__', 'Unknown')
+            logger.error(f"Validation Error: Element in '{field_name}' at index {idx} must be a dictionary or a non-empty string at line {line}.")
+            return False
+    return True
+
+# Main validation function for YAML
 def validate_yaml(data, logger):
     # Ensure the data is a dictionary
     if not isinstance(data, dict):
@@ -36,47 +76,16 @@ def validate_yaml(data, logger):
                 logger.error(f"Validation Error: Field '{field}' must be of type {field_type.__name__}, got {type(data[field]).__name__} at line {line}.")
                 return False
 
-            # Check if the field is a string and it's not empty
-            if field_type == str and not data[field].strip():
+            # Validate string fields
+            if field_type == str:
                 line = data.get('__line__', 'Unknown')
-                logger.error(f"Validation Error: Field '{field}' must not be an empty string at line {line}.")
-                return False
+                if not validate_string(data[field], field, line, logger):
+                    return False
 
-            # Check if the field is a list and ensure no empty strings in the list
+            # Validate list fields
             if field_type == list:
-                for idx, item in enumerate(data[field]):
-                    if isinstance(item, str):
-                        line = data.get('__line__', 'Unknown')  # Default to parent line if no line info in string
-                        if not item.strip():
-                            logger.error(f"Validation Error: Element in '{field}' at index {idx} must be a non-empty string at line {line}.")
-                            return False
-                    # For lists of dictionaries (e.g., join_conditions)
-                    elif isinstance(item, dict):
-                        line = item.get('__line__', 'Unknown')
-                        if field == 'join_conditions':
-                            join_type = item.get('join_type', '').upper()
-                            # CROSS JOIN logic
-                            if join_type in ["CROSS", "CROSS JOIN"]:
-                                if 'join_condition' in item:
-                                    logger.error(f"Validation Error: CROSS JOIN at join_conditions[{idx}] should not have 'join_condition' at line {line}.")
-                                    return False
-                                if 'join_table' not in item or not item['join_table'].strip():
-                                    logger.error(f"Validation Error: CROSS JOIN at join_conditions[{idx}] must have a non-empty 'join_table' at line {line}.")
-                                    return False
-                            # Non-CROSS JOIN logic
-                            else:
-                                if 'join_table' not in item or not item['join_table'].strip():
-                                    logger.error(f"Validation Error: Non-CROSS JOIN at join_conditions[{idx}] must have a non-empty 'join_table' at line {line}.")
-                                    return False
-                                if 'join_condition' not in item or not item['join_condition'].strip():
-                                    logger.error(f"Validation Error: Non-CROSS JOIN at join_conditions[{idx}] must have a non-empty 'join_condition' at line {line}.")
-                                    return False
-                        else:
-                            logger.error(f"Validation Error: Unexpected dictionary structure in field '{field}' at index {idx}.")
-                            return False
-                    else:
-                        logger.error(f"Validation Error: Element in '{field}' at index {idx} must be a dictionary or a non-empty string at line {line}.")
-                        return False
+                if not validate_list(data[field], field, logger):
+                    return False
         else:
             # If the field is not present but is required, log the error
             if field not in ['where_conditions', 'group_by', 'having', 'order_by', 'join_conditions', 'unions']:
@@ -106,31 +115,15 @@ def validate_yaml(data, logger):
                         logger.error(f"Validation Error at {union_path}.{field} (line {union_line}): Field '{field}' must be of type {field_type.__name__}, got {type(union[field]).__name__}.")
                         return False
 
-                    # Validate strings in unions are not empty
-                    if field_type == str and not union[field].strip():
-                        logger.error(f"Validation Error at {union_path}.{field} (line {union_line}): Field '{field}' must not be an empty string.")
-                        return False
+                    # Validate string fields in union
+                    if field_type == str:
+                        if not validate_string(union[field], f"{union_path}.{field}", union_line, logger):
+                            return False
 
-                    # Validate lists in unions have no empty strings
+                    # Validate list fields in union
                     if field_type == list:
-                        for idx, item in enumerate(union[field]):
-                            if isinstance(item, str):
-                                if not item.strip():
-                                    logger.error(f"Validation Error at {union_path}.{field} at index {idx}: Element must be a non-empty string at line {union_line}.")
-                                    return False
-                            elif isinstance(item, dict):
-                                line = item.get('__line__', 'Unknown')
-                                if 'join_conditions' in union:
-                                    for join_idx, join in enumerate(union['join_conditions']):
-                                        join_type = join.get('join_type', '').upper()
-                                        if join_type in ["CROSS", "CROSS JOIN"]:
-                                            if 'join_condition' in join:
-                                                logger.error(f"Validation Error at unions[{index}].join_conditions[{join_idx}] (line {line}): CROSS JOIN should not have 'join_condition'.")
-                                                return False
-                                        else:
-                                            if not join.get('join_condition', '').strip():
-                                                logger.error(f"Validation Error at unions[{index}].join_conditions[{join_idx}] (line {line}): Non-CROSS JOIN must have a non-empty 'join_condition'.")
-                                                return False
+                        if not validate_list(union[field], f"{union_path}.{field}", logger):
+                            return False
 
     # If all validations pass
     logger.info("YAML validation passed.")
