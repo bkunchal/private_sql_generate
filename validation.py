@@ -62,8 +62,8 @@ def validate_yaml(data, logger):
             join_type = join.get('join_type', '').upper()
             join_path = f"join_conditions[{index}]"
             join_line = join.get('__line__', 'Unknown')
-            
-            # Allow either "CROSS" or "CROSS JOIN"
+
+            # Allow either "CROSS" or "CROSS JOIN" without join_condition
             if join_type in ["CROSS", "CROSS JOIN"]:
                 if 'join_condition' in join:
                     logger.error(f"Validation Error: CROSS JOIN at {join_path} should not have join_condition at line {join_line}.")
@@ -109,6 +109,24 @@ def validate_yaml(data, logger):
                             if not isinstance(item, str) or not item.strip():
                                 logger.error(f"Validation Error at {union_path}.{field} at index {idx}: Element must be a non-empty string at line {line}.")
                                 return False
+
+            # Validate join_conditions in each union
+            if 'join_conditions' in union:
+                for join_index, join in enumerate(union['join_conditions']):
+                    join_path = f"{union_path}.join_conditions[{join_index}]"
+                    join_type = join.get('join_type', '').upper()
+                    join_line = join.get('__line__', 'Unknown')
+
+                    # Handle CROSS JOIN in unions
+                    if join_type in ["CROSS", "CROSS JOIN"]:
+                        if 'join_condition' in join:
+                            logger.error(f"Validation Error at {join_path} (line {join_line}): CROSS JOIN should not have join_condition.")
+                            return False
+                    else:
+                        # Non-CROSS JOINs must have join_table and join_condition in unions
+                        if 'join_table' not in join or 'join_condition' not in join:
+                            logger.error(f"Validation Error at {join_path} (line {join_line}): Non-CROSS JOIN in union must contain 'join_table' and 'join_condition'.")
+                            return False
 
     # If all validations pass
     logger.info("YAML validation passed.")
