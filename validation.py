@@ -1,14 +1,19 @@
+import yaml
 import logging
 
-class ValidationError(Exception):
-    """Custom exception for validation errors."""
-    pass
+# Custom YAML loader to track line numbers
+class LineLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        mapping = super().construct_mapping(node, deep=deep)
+        mapping['__line__'] = node.start_mark.line + 1  # Capture line number
+        return mapping
 
-# Define the custom validation function for YAML
+# Define the validation function for YAML
 def validate_yaml(data, logger):
     # Ensure the data is a dictionary
     if not isinstance(data, dict):
-        logger.error("Validation Error: YAML data should be a dictionary.")
+        line = data.get('__line__', 'Unknown')
+        logger.error(f"Validation Error at root (line {line}): YAML data should be a dictionary.")
         return False
 
     # Required fields with specific types
@@ -27,71 +32,72 @@ def validate_yaml(data, logger):
     for field, field_type in required_fields.items():
         if field in data:
             if not isinstance(data[field], field_type):
-                logger.error(f"Validation Error: Field '{field}' must be of type {field_type.__name__}.")
+                line = data.get('__line__', 'Unknown')
+                logger.error(f"Validation Error: Field '{field}' must be of type {field_type.__name__}, got {type(data[field]).__name__} at line {line}.")
                 return False
-        else:
-            if field not in ['where_conditions', 'group_by', 'having', 'order_by', 'join_conditions', 'unions']:
-                logger.error(f"Validation Error: Missing required field '{field}'.")
-                return False
+        elif field not in ['where_conditions', 'group_by', 'having', 'order_by', 'join_conditions', 'unions']:
+            logger.error(f"Validation Error: Missing required field '{field}' in YAML.")
+            return False
 
-    # Validate fields within join conditions if present
+    # Validate join_conditions, if present
     if 'join_conditions' in data:
         for index, join in enumerate(data['join_conditions']):
-            if not isinstance(join, dict):
-                logger.error(f"Validation Error: Join condition at index {index} must be a dictionary.")
-                return False
-
             join_type = join.get('join_type', '').upper()
-
-            # CROSS JOIN should not have a join_condition
-            if join_type == "CROSS JOIN" and 'join_condition' in join:
-                logger.error(f"Validation Error: CROSS JOIN at index {index} should not have a join_condition.")
-                return False
-
-            # Non-CROSS JOINs should have join_table and join_condition
-            if join_type != "CROSS JOIN":
+            join_path = f"join_conditions[{index}]"
+            join_line = join.get('__line__', 'Unknown')
+            
+            # Allow either "CROSS" or "CROSS JOIN"
+            if join_type in ["CROSS", "CROSS JOIN"]:
+                if 'join_condition' in join:
+                    logger.error(f"Validation Error: CROSS JOIN at {join_path} should not have join_condition at line {join_line}.")
+                    return False
+            else:
+                # Non-CROSS JOINs must have join_table and join_condition
                 if 'join_table' not in join or 'join_condition' not in join:
-                    logger.error(f"Validation Error: Join condition at index {index} must contain 'join_table' and 'join_condition' for non-CROSS JOIN.")
+                    logger.error(f"Validation Error: Non-CROSS JOIN at {join_path} must contain 'join_table' and 'join_condition' at line {join_line}.")
                     return False
 
-    # Validate unions if present
+    # Validate unions, if present
     if 'unions' in data:
-        for union_index, union in enumerate(data['unions']):
+        for index, union in enumerate(data['unions']):
+            union_path = f"unions[{index}]"
+            union_line = union.get('__line__', 'Unknown')
+
+            # Required fields in union
             union_required_fields = {
                 'select_columns': list,
                 'table_name': str,
-                'where_conditions': str,  # Optional, but must be a string if present
+                'where_conditions': str,  # Optional, but should be a string if present
                 'group_by': list,  # Optional
                 'having': str,  # Optional
                 'order_by': list,  # Optional
                 'join_conditions': list  # Optional, but should be a list if present
             }
+
             for field, field_type in union_required_fields.items():
                 if field in union:
                     if not isinstance(union[field], field_type):
-                        logger.error(f"Validation Error: Union at index {union_index} field '{field}' must be of type {field_type.__name__}.")
-                        return False
-                else:
-                    if field in ['select_columns', 'table_name']:
-                        logger.error(f"Validation Error: Missing required union field '{field}' in union at index {union_index}.")
+                        logger.error(f"Validation Error at {union_path}.{field} (line {union_line}): Field '{field}' must be of type {field_type.__name__}, got {type(union[field]).__name__}.")
                         return False
 
-            # Validate join_conditions in unions
+            # Validate join_conditions in each union
             if 'join_conditions' in union:
                 for join_index, join in enumerate(union['join_conditions']):
+                    join_path = f"{union_path}.join_conditions[{join_index}]"
                     join_type = join.get('join_type', '').upper()
+                    join_line = join.get('__line__', 'Unknown')
 
-                    # CROSS JOIN should not have a join_condition in unions
-                    if join_type == "CROSS JOIN" and 'join_condition' in join:
-                        logger.error(f"Validation Error: Union CROSS JOIN at index {union_index}, join {join_index} should not have a join_condition.")
-                        return False
-
-                    # Non-CROSS JOINs should have join_table and join_condition in unions
-                    if join_type != "CROSS JOIN":
+                    # Allow either "CROSS" or "CROSS JOIN" in unions
+                    if join_type in ["CROSS", "CROSS JOIN"]:
+                        if 'join_condition' in join:
+                            logger.error(f"Validation Error at {join_path} (line {join_line}): CROSS JOIN should not have join_condition.")
+                            return False
+                    else:
+                        # Non-CROSS JOINs must have join_table and join_condition in unions
                         if 'join_table' not in join or 'join_condition' not in join:
-                            logger.error(f"Validation Error: Union join condition at index {union_index}, join {join_index} must contain 'join_table' and 'join_condition' for non-CROSS JOIN.")
+                            logger.error(f"Validation Error at {join_path} (line {join_line}): Non-CROSS JOIN in union must contain 'join_table' and 'join_condition'.")
                             return False
 
-    # If all validations pass, return True
+    # If all validations pass
     logger.info("YAML validation passed.")
     return True
