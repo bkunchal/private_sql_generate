@@ -1,5 +1,8 @@
-# validation.py
 import logging
+
+class ValidationError(Exception):
+    """Custom exception for validation errors."""
+    pass
 
 # Define the custom validation function for YAML
 def validate_yaml(data, logger):
@@ -37,9 +40,19 @@ def validate_yaml(data, logger):
             if not isinstance(join, dict):
                 logger.error(f"Validation Error: Join condition at index {index} must be a dictionary.")
                 return False
-            if 'join_table' not in join or 'join_condition' not in join:
-                logger.error(f"Validation Error: Join condition at index {index} must contain 'join_table' and 'join_condition'.")
+
+            join_type = join.get('join_type', '').upper()
+
+            # CROSS JOIN should not have a join_condition
+            if join_type == "CROSS JOIN" and 'join_condition' in join:
+                logger.error(f"Validation Error: CROSS JOIN at index {index} should not have a join_condition.")
                 return False
+
+            # Non-CROSS JOINs should have join_table and join_condition
+            if join_type != "CROSS JOIN":
+                if 'join_table' not in join or 'join_condition' not in join:
+                    logger.error(f"Validation Error: Join condition at index {index} must contain 'join_table' and 'join_condition' for non-CROSS JOIN.")
+                    return False
 
     # Validate unions if present
     if 'unions' in data:
@@ -49,6 +62,7 @@ def validate_yaml(data, logger):
                 'table_name': str,
                 'where_conditions': str,  # Optional, but must be a string if present
                 'group_by': list,  # Optional
+                'having': str,  # Optional
                 'order_by': list,  # Optional
                 'join_conditions': list  # Optional, but should be a list if present
             }
@@ -65,12 +79,18 @@ def validate_yaml(data, logger):
             # Validate join_conditions in unions
             if 'join_conditions' in union:
                 for join_index, join in enumerate(union['join_conditions']):
-                    if not isinstance(join, dict):
-                        logger.error(f"Validation Error: Union join condition at index {union_index}, join {join_index} must be a dictionary.")
+                    join_type = join.get('join_type', '').upper()
+
+                    # CROSS JOIN should not have a join_condition in unions
+                    if join_type == "CROSS JOIN" and 'join_condition' in join:
+                        logger.error(f"Validation Error: Union CROSS JOIN at index {union_index}, join {join_index} should not have a join_condition.")
                         return False
-                    if 'join_table' not in join or 'join_condition' not in join:
-                        logger.error(f"Validation Error: Union join condition at index {union_index}, join {join_index} must contain 'join_table' and 'join_condition'.")
-                        return False
+
+                    # Non-CROSS JOINs should have join_table and join_condition in unions
+                    if join_type != "CROSS JOIN":
+                        if 'join_table' not in join or 'join_condition' not in join:
+                            logger.error(f"Validation Error: Union join condition at index {union_index}, join {join_index} must contain 'join_table' and 'join_condition' for non-CROSS JOIN.")
+                            return False
 
     # If all validations pass, return True
     logger.info("YAML validation passed.")

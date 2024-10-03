@@ -5,13 +5,12 @@ import sys  # For accessing command-line arguments
 from validation import validate_yaml  # Import the validation function
 from logger import setup_logging  # Import your custom logging setup function
 
-# Function to generate SQL from YAML
 def generate_sql_from_yaml_file(file_path, logger):
     try:
         # Load the YAML content from the specified file
         with open(file_path, 'r') as file:
             data = yaml.safe_load(file)
-            print(f"Loaded YAML data: {data}")  # Add this line to inspect the loaded YAML data
+            print(f"Loaded YAML data: {data}")
 
         # Validate the loaded data against the schema, passing the logger
         if not validate_yaml(data, logger):
@@ -31,8 +30,16 @@ def generate_sql_from_yaml_file(file_path, logger):
             for join in data['join_conditions']:
                 join_type = join.get('join_type', '').upper()
                 join_table = join.get('join_table', '')
-                join_condition = join.get('join_condition', '')
-                sql_query += f"{join_type} JOIN {join_table} ON {join_condition} "
+
+                # Append "JOIN" automatically if it's missing
+                if "JOIN" not in join_type:
+                    join_type += " JOIN"
+
+                if join_type == "CROSS JOIN":
+                    sql_query += f"{join_type} {join_table} "  # CROSS JOIN doesn't have ON clause
+                else:
+                    join_condition = join.get('join_condition', '')
+                    sql_query += f"{join_type} {join_table} ON {join_condition} "
         
         # Add WHERE clause if it exists
         if 'where_conditions' in data and data['where_conditions']:
@@ -61,8 +68,16 @@ def generate_sql_from_yaml_file(file_path, logger):
                     for join in union['join_conditions']:
                         join_type = join.get('join_type', '').upper()
                         join_table = join.get('join_table', '')
-                        join_condition = join.get('join_condition', '')
-                        union_query += f"{join_type} JOIN {join_table} ON {join_condition} "
+
+                        # Append "JOIN" automatically if it's missing
+                        if "JOIN" not in join_type:
+                            join_type += " JOIN"
+
+                        if join_type == "CROSS JOIN":
+                            union_query += f"{join_type} {join_table} "  # CROSS JOIN in unions
+                        else:
+                            join_condition = join.get('join_condition', '')
+                            union_query += f"{join_type} {join_table} ON {join_condition} "
                 
                 # Add WHERE clause for each union if it exists
                 if 'where_conditions' in union and union['where_conditions']:
@@ -71,6 +86,10 @@ def generate_sql_from_yaml_file(file_path, logger):
                 # Add GROUP BY clause for each union if it exists
                 if 'group_by' in union and union['group_by']:
                     union_query += "GROUP BY " + ', '.join(union['group_by']) + ' '
+                
+                # Add HAVING clause for each union if it exists
+                if 'having' in union and union['having']:
+                    union_query += f"HAVING {union['having']} "
                 
                 # Add ORDER BY clause for each union if it exists
                 if 'order_by' in union and union['order_by']:
@@ -89,7 +108,7 @@ def generate_sql_from_yaml_file(file_path, logger):
         logger.error(f"YAML file not found: {file_path}")
     except Exception as e:
         logger.error(f"Error generating SQL: {e}")
-        return None  # Return None in case of errors
+        return None  
 
 # Main execution point
 if __name__ == "__main__":
