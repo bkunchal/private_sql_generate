@@ -35,9 +35,25 @@ def validate_yaml(data, logger):
                 line = data.get('__line__', 'Unknown')
                 logger.error(f"Validation Error: Field '{field}' must be of type {field_type.__name__}, got {type(data[field]).__name__} at line {line}.")
                 return False
-        elif field not in ['where_conditions', 'group_by', 'having', 'order_by', 'join_conditions', 'unions']:
-            logger.error(f"Validation Error: Missing required field '{field}' in YAML.")
-            return False
+
+            # Check if the field is a string and it's not empty
+            if field_type == str and not data[field].strip():
+                line = data.get('__line__', 'Unknown')
+                logger.error(f"Validation Error: Field '{field}' must not be an empty string at line {line}.")
+                return False
+
+            # Check if the field is a list and ensure no empty strings in the list
+            if field_type == list:
+                for idx, item in enumerate(data[field]):
+                    if not isinstance(item, str) or not item.strip():
+                        line = data.get('__line__', 'Unknown')
+                        logger.error(f"Validation Error: Element in '{field}' at index {idx} must be a non-empty string at line {line}.")
+                        return False
+        else:
+            # If the field is not present but is required, log the error
+            if field not in ['where_conditions', 'group_by', 'having', 'order_by', 'join_conditions', 'unions']:
+                logger.error(f"Validation Error: Missing required field '{field}'.")
+                return False
 
     # Validate join_conditions, if present
     if 'join_conditions' in data:
@@ -80,23 +96,17 @@ def validate_yaml(data, logger):
                         logger.error(f"Validation Error at {union_path}.{field} (line {union_line}): Field '{field}' must be of type {field_type.__name__}, got {type(union[field]).__name__}.")
                         return False
 
-            # Validate join_conditions in each union
-            if 'join_conditions' in union:
-                for join_index, join in enumerate(union['join_conditions']):
-                    join_path = f"{union_path}.join_conditions[{join_index}]"
-                    join_type = join.get('join_type', '').upper()
-                    join_line = join.get('__line__', 'Unknown')
+                    # Validate strings in unions are not empty
+                    if field_type == str and not union[field].strip():
+                        logger.error(f"Validation Error at {union_path}.{field} (line {union_line}): Field '{field}' must not be an empty string.")
+                        return False
 
-                    # Allow either "CROSS" or "CROSS JOIN" in unions
-                    if join_type in ["CROSS", "CROSS JOIN"]:
-                        if 'join_condition' in join:
-                            logger.error(f"Validation Error at {join_path} (line {join_line}): CROSS JOIN should not have join_condition.")
-                            return False
-                    else:
-                        # Non-CROSS JOINs must have join_table and join_condition in unions
-                        if 'join_table' not in join or 'join_condition' not in join:
-                            logger.error(f"Validation Error at {join_path} (line {join_line}): Non-CROSS JOIN in union must contain 'join_table' and 'join_condition'.")
-                            return False
+                    # Validate lists in unions have no empty strings
+                    if field_type == list:
+                        for idx, item in enumerate(union[field]):
+                            if not isinstance(item, str) or not item.strip():
+                                logger.error(f"Validation Error at {union_path}.{field} at index {idx}: Element must be a non-empty string.")
+                                return False
 
     # If all validations pass
     logger.info("YAML validation passed.")
