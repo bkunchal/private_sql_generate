@@ -19,12 +19,12 @@ def validate_string(value, field_name, line, logger):
 def validate_list(items, field_name, logger):
     for idx, item in enumerate(items):
         if isinstance(item, str):
-            # Validate non-empty string
-            line = items.get('__line__', 'Unknown')
+            # We assume the line number comes from the parent list since individual strings don't have line info
+            line = 'Unknown'  # Update with the correct parent line number if available
             if not validate_string(item, f"{field_name}[{idx}]", line, logger):
                 return False
         elif isinstance(item, dict):
-            line = item.get('__line__', 'Unknown')
+            line = item.get('__line__', 'Unknown')  # Correctly use .get() for dicts only
             if field_name == 'join_conditions':
                 # Handle CROSS JOIN or regular join validation in lists of dicts
                 join_type = item.get('join_type', '').upper()
@@ -43,7 +43,7 @@ def validate_list(items, field_name, logger):
                 logger.error(f"Validation Error: Unexpected dictionary structure in field '{field_name}' at index {idx}.")
                 return False
         else:
-            line = items.get('__line__', 'Unknown')
+            line = 'Unknown'  # Default to a parent line or specify 'Unknown'
             logger.error(f"Validation Error: Element in '{field_name}' at index {idx} must be a dictionary or a non-empty string at line {line}.")
             return False
     return True
