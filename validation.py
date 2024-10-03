@@ -45,8 +45,9 @@ def validate_yaml(data, logger):
             # Check if the field is a list and ensure no empty strings in the list
             if field_type == list:
                 for idx, item in enumerate(data[field]):
+                    # Get line number for individual list items, if present
+                    line = item.get('__line__', 'Unknown') if isinstance(item, dict) else data.get('__line__', 'Unknown')
                     if not isinstance(item, str) or not item.strip():
-                        line = data.get('__line__', 'Unknown')
                         logger.error(f"Validation Error: Element in '{field}' at index {idx} must be a non-empty string at line {line}.")
                         return False
         else:
@@ -104,8 +105,9 @@ def validate_yaml(data, logger):
                     # Validate lists in unions have no empty strings
                     if field_type == list:
                         for idx, item in enumerate(union[field]):
+                            line = item.get('__line__', 'Unknown') if isinstance(item, dict) else union.get('__line__', 'Unknown')
                             if not isinstance(item, str) or not item.strip():
-                                logger.error(f"Validation Error at {union_path}.{field} at index {idx}: Element must be a non-empty string.")
+                                logger.error(f"Validation Error at {union_path}.{field} at index {idx}: Element must be a non-empty string at line {line}.")
                                 return False
 
     # If all validations pass
