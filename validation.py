@@ -28,7 +28,7 @@ def validate_yaml(data, logger):
         'unions': list  # Optional, but should be a list of union dictionaries
     }
 
-    # Validate required fields and their types
+    # Validate required fields and their types, and ensure no empty strings
     for field, field_type in required_fields.items():
         if field in data:
             if not isinstance(data[field], field_type):
@@ -45,9 +45,8 @@ def validate_yaml(data, logger):
             # Check if the field is a list and ensure no empty strings in the list
             if field_type == list:
                 for idx, item in enumerate(data[field]):
-                    # Get line number for individual list items, if present
-                    line = item.get('__line__', 'Unknown') if isinstance(item, dict) else data.get('__line__', 'Unknown')
                     if not isinstance(item, str) or not item.strip():
+                        line = data.get('__line__', 'Unknown')
                         logger.error(f"Validation Error: Element in '{field}' at index {idx} must be a non-empty string at line {line}.")
                         return False
         else:
@@ -68,10 +67,13 @@ def validate_yaml(data, logger):
                 if 'join_condition' in join:
                     logger.error(f"Validation Error: CROSS JOIN at {join_path} should not have join_condition at line {join_line}.")
                     return False
+                if 'join_table' not in join or not join['join_table'].strip():
+                    logger.error(f"Validation Error: CROSS JOIN at {join_path} must have a non-empty 'join_table' at line {join_line}.")
+                    return False
             else:
                 # Non-CROSS JOINs must have join_table and join_condition
-                if 'join_table' not in join or 'join_condition' not in join:
-                    logger.error(f"Validation Error: Non-CROSS JOIN at {join_path} must contain 'join_table' and 'join_condition' at line {join_line}.")
+                if 'join_table' not in join or not join['join_table'].strip() or 'join_condition' not in join or not join['join_condition'].strip():
+                    logger.error(f"Validation Error: Non-CROSS JOIN at {join_path} must contain non-empty 'join_table' and 'join_condition' at line {join_line}.")
                     return False
 
     # Validate unions, if present
@@ -105,9 +107,8 @@ def validate_yaml(data, logger):
                     # Validate lists in unions have no empty strings
                     if field_type == list:
                         for idx, item in enumerate(union[field]):
-                            line = item.get('__line__', 'Unknown') if isinstance(item, dict) else union.get('__line__', 'Unknown')
                             if not isinstance(item, str) or not item.strip():
-                                logger.error(f"Validation Error at {union_path}.{field} at index {idx}: Element must be a non-empty string at line {line}.")
+                                logger.error(f"Validation Error at {union_path}.{field} at index {idx}: Element must be a non-empty string at line {union_line}.")
                                 return False
 
             # Validate join_conditions in each union
@@ -122,10 +123,13 @@ def validate_yaml(data, logger):
                         if 'join_condition' in join:
                             logger.error(f"Validation Error at {join_path} (line {join_line}): CROSS JOIN should not have join_condition.")
                             return False
+                        if 'join_table' not in join or not join['join_table'].strip():
+                            logger.error(f"Validation Error: CROSS JOIN at {join_path} must have a non-empty 'join_table' at line {join_line}.")
+                            return False
                     else:
                         # Non-CROSS JOINs must have join_table and join_condition in unions
-                        if 'join_table' not in join or 'join_condition' not in join:
-                            logger.error(f"Validation Error at {join_path} (line {join_line}): Non-CROSS JOIN in union must contain 'join_table' and 'join_condition'.")
+                        if 'join_table' not in join or not join['join_table'].strip() or 'join_condition' not in join or not join['join_condition'].strip():
+                            logger.error(f"Validation Error at {join_path} (line {join_line}): Non-CROSS JOIN in union must contain non-empty 'join_table' and 'join_condition'.")
                             return False
 
     # If all validations pass
