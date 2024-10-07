@@ -36,7 +36,7 @@ def generate_sql_clauses(data):
 
     # Add ORDER BY clause
     if 'order_by' in data and data['order_by']:
-        sql_clauses += "ORDER BY " + ', '.join(data['order_by']) + ' "
+        sql_clauses += "ORDER BY " + ', '.join(data['order_by']) + ' '
 
     return sql_clauses
 
@@ -97,8 +97,8 @@ def generate_sql_from_yaml_file(file_path, logger):
 
 # Main execution
 if __name__ == "__main__":
-    yaml_file_path = "sample.yaml"
-    loginput_path = "logs"
+    yaml_file_path = "C:\\Users\\balaji kunchala\\Documents\\sample.yaml"
+    loginput_path = "C:\\Users\\balaji kunchala\\Documents\\sql_generator\\logs"
 
     if not os.path.exists(loginput_path):
         os.makedirs(loginput_path)

@@ -5,7 +5,7 @@ import logging
 class LineLoader(yaml.SafeLoader):
     def construct_mapping(self, node, deep=False):
         mapping = super().construct_mapping(node, deep=deep)
-        mapping['__line__'] = node.start_mark.line + 1  # Capture line number
+        mapping['__line__'] = node.start_mark.line + 1  
         return mapping
 
 # Helper method to validate strings
@@ -16,36 +16,102 @@ def validate_string(value, field_name, line, logger):
     return True
 
 # Helper method to validate lists (strings or dictionaries)
-def validate_list(items, field_name, logger):
+def validate_list(items, field_name, parent_line, logger):
     for idx, item in enumerate(items):
         if isinstance(item, str):
-            # We assume the line number comes from the parent list since individual strings don't have line info
-            line = 'Unknown'  # Update with the correct parent line number if available
+            # Validate each string in the list
+            line = parent_line  # Use parent's line for individual strings
             if not validate_string(item, f"{field_name}[{idx}]", line, logger):
                 return False
         elif isinstance(item, dict):
-            line = item.get('__line__', 'Unknown')  # Correctly use .get() for dicts only
-            if field_name == 'join_conditions':
-                # Handle CROSS JOIN or regular join validation in lists of dicts
-                join_type = item.get('join_type', '').upper()
-                if join_type in ["CROSS", "CROSS JOIN"]:
-                    if 'join_condition' in item:
-                        logger.error(f"Validation Error: CROSS JOIN at {field_name}[{idx}] should not have 'join_condition' at line {line}.")
-                        return False
-                    if not validate_string(item.get('join_table', ''), 'join_table', line, logger):
-                        return False
-                else:
-                    if not validate_string(item.get('join_table', ''), 'join_table', line, logger):
-                        return False
-                    if not validate_string(item.get('join_condition', ''), 'join_condition', line, logger):
-                        return False
+            # Validate each dictionary in the list
+            line = item.get('__line__', parent_line)  # Fallback to parent line if not found
+            if field_name == 'unions':
+                # Validate the fields in the union dictionaries
+                if not validate_union_dict(item, f"{field_name}[{idx}]", line, logger):
+                    return False
+            elif field_name == 'join_conditions':
+                # Validate the fields in join_conditions dictionaries
+                if not validate_join_dict(item, f"{field_name}[{idx}]", line, logger):
+                    return False
             else:
-                logger.error(f"Validation Error: Unexpected dictionary structure in field '{field_name}' at index {idx}.")
+                logger.error(f"Validation Error: Unexpected dictionary structure in field '{field_name}' at index {idx} at line {line}.")
                 return False
         else:
-            line = 'Unknown'  # Default to a parent line or specify 'Unknown'
+            line = parent_line
             logger.error(f"Validation Error: Element in '{field_name}' at index {idx} must be a dictionary or a non-empty string at line {line}.")
             return False
+    return True
+
+# Function to validate dictionaries in 'unions'
+def validate_union_dict(union, field_name, line, logger):
+    # Required fields in union
+    required_union_fields = ['select_columns', 'table_name']
+    
+    for field in required_union_fields:
+        if field not in union:
+            logger.error(f"Validation Error: Missing required field '{field}' in {field_name} at line {line}.")
+            return False
+        
+        # Validate select_columns as a list
+        if field == 'select_columns':
+            if not isinstance(union[field], list):
+                logger.error(f"Validation Error: Field 'select_columns' must be a list in {field_name} at line {line}.")
+                return False
+            if not validate_list(union[field], 'select_columns', line, logger):
+                return False
+        
+        # Validate table_name as a string
+        if field == 'table_name':
+            if not isinstance(union[field], str):
+                logger.error(f"Validation Error: Field 'table_name' must be a string in {field_name} at line {line}.")
+                return False
+            if not validate_string(union[field], 'table_name', line, logger):
+                return False
+
+    # Optional fields to validate if they exist
+    optional_fields = ['where_conditions', 'group_by', 'having', 'order_by', 'join_conditions']
+    
+    for field in optional_fields:
+        if field in union:
+            if field == 'join_conditions':
+                if not validate_list(union[field], 'join_conditions', line, logger):
+                    return False
+            elif isinstance(union[field], list):
+                if not validate_list(union[field], field, line, logger):
+                    return False
+            elif isinstance(union[field], str):
+                if not validate_string(union[field], field, line, logger):
+                    return False
+
+    return True
+
+# Function to validate dictionaries in 'join_conditions'
+def validate_join_dict(join, field_name, line, logger):
+    # Required fields for each join condition
+    required_fields = ['join_type', 'join_table', 'join_condition']
+    
+    for field in required_fields:
+        if field not in join:
+            if field == 'join_condition' and join.get('join_type', '').upper() in ["CROSS", "CROSS JOIN"]:
+                # CROSS JOIN doesn't require a join_condition
+                continue
+            logger.error(f"Validation Error: Missing required field '{field}' in {field_name} at line {line}.")
+            return False
+
+        if field == 'join_type':
+            if join[field].upper() in ["CROSS", "CROSS JOIN"]:
+                # CROSS JOIN should not have a join_condition
+                if 'join_condition' in join:
+                    logger.error(f"Validation Error: CROSS JOIN in {field_name} should not have 'join_condition' at line {line}.")
+                    return False
+            if not validate_string(join[field], 'join_type', line, logger):
+                return False
+
+        if field in ['join_table', 'join_condition']:
+            if not validate_string(join[field], field, line, logger):
+                return False
+
     return True
 
 # Main validation function for YAML
@@ -60,12 +126,12 @@ def validate_yaml(data, logger):
     required_fields = {
         'select_columns': list,
         'table_name': str,
-        'join_conditions': list,  # Optional, but should be a list if present
-        'where_conditions': str,  # Optional, but should be a string if present
-        'group_by': list,  # Optional, but should be a list if present
-        'having': str,  # Optional, but should be a string if present
-        'order_by': list,  # Optional, but should be a list if present
-        'unions': list  # Optional, but should be a list of union dictionaries
+        'join_conditions': list,  # Optional
+        'where_conditions': str,  # Optional
+        'group_by': list,  # Optional
+        'having': str,  # Optional
+        'order_by': list,  # Optional
+        'unions': list  # Optional
     }
 
     # Validate required fields and their types, and ensure no empty strings
@@ -84,7 +150,8 @@ def validate_yaml(data, logger):
 
             # Validate list fields
             if field_type == list:
-                if not validate_list(data[field], field, logger):
+                line = data.get('__line__', 'Unknown')
+                if not validate_list(data[field], field, line, logger):
                     return False
         else:
             # If the field is not present but is required, log the error
@@ -98,33 +165,9 @@ def validate_yaml(data, logger):
             union_path = f"unions[{index}]"
             union_line = union.get('__line__', 'Unknown')
 
-            # Required fields in union
-            union_required_fields = {
-                'select_columns': list,
-                'table_name': str,
-                'where_conditions': str,  # Optional, but should be a string if present
-                'group_by': list,  # Optional
-                'having': str,  # Optional
-                'order_by': list,  # Optional
-                'join_conditions': list  # Optional, but should be a list if present
-            }
+            # Validate the dictionary structure of the union
+            if not validate_union_dict(union, union_path, union_line, logger):
+                return False
 
-            for field, field_type in union_required_fields.items():
-                if field in union:
-                    if not isinstance(union[field], field_type):
-                        logger.error(f"Validation Error at {union_path}.{field} (line {union_line}): Field '{field}' must be of type {field_type.__name__}, got {type(union[field]).__name__}.")
-                        return False
-
-                    # Validate string fields in union
-                    if field_type == str:
-                        if not validate_string(union[field], f"{union_path}.{field}", union_line, logger):
-                            return False
-
-                    # Validate list fields in union
-                    if field_type == list:
-                        if not validate_list(union[field], f"{union_path}.{field}", logger):
-                            return False
-
-    # If all validations pass
     logger.info("YAML validation passed.")
     return True
