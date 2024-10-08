@@ -1,31 +1,40 @@
 import yaml
 import logging
 
-# Custom YAML loader to track line numbers
+# Custom YAML loader to track line numbers for every field
 class LineLoader(yaml.SafeLoader):
     def construct_mapping(self, node, deep=False):
         mapping = super().construct_mapping(node, deep=deep)
-        mapping['__line__'] = node.start_mark.line + 1  
+        mapping['__line__'] = node.start_mark.line + 1  # Line number for this mapping
+        # For every key in the mapping, track its line number
+        for key_node, value_node in node.value:
+            if isinstance(value_node, yaml.Node):
+                mapping[f"__{key_node.value}_line__"] = value_node.start_mark.line + 1
         return mapping
 
-# Helper method to validate strings
+# Helper method to validate strings, ensuring they are non-empty and not lists
 def validate_string(value, field_name, line, logger):
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, str):
+        logger.error(f"Validation Error: Field '{field_name}' must be a string, not {type(value).__name__} at line {line}.")
+        return False
+    if not value.strip():
         logger.error(f"Validation Error: Field '{field_name}' must be a non-empty string at line {line}.")
         return False
     return True
 
 # Helper method to validate lists (strings or dictionaries)
 def validate_list(items, field_name, parent_line, logger):
+    if not isinstance(items, list) or not items:
+        logger.error(f"Validation Error: Field '{field_name}' must be a non-empty list at line {parent_line}.")
+        return False
+
     for idx, item in enumerate(items):
         if isinstance(item, str):
-            # Validate each string in the list
             line = parent_line  # Use parent's line for individual strings
             if not validate_string(item, f"{field_name}[{idx}]", line, logger):
                 return False
         elif isinstance(item, dict):
-            # Validate each dictionary in the list
-            line = item.get('__line__', parent_line)  # Fallback to parent line if not found
+            line = item.get('__line__', parent_line)  # Use item's line if available
             if field_name == 'unions':
                 # Validate the fields in the union dictionaries
                 if not validate_union_dict(item, f"{field_name}[{idx}]", line, logger):
@@ -39,7 +48,7 @@ def validate_list(items, field_name, parent_line, logger):
                 return False
         else:
             line = parent_line
-            logger.error(f"Validation Error: Element in '{field_name}' at index {idx} must be a dictionary or a non-empty string at line {line}.")
+            logger.error(f"Validation Error: Element in '{field_name}' at index {idx} must be a non-empty string or dictionary at line {line}.")
             return False
     return True
 
@@ -74,14 +83,21 @@ def validate_union_dict(union, field_name, line, logger):
     
     for field in optional_fields:
         if field in union:
+            # Capture the correct line number for each field if available
+            field_line = union.get(f"__{field}_line__", union.get('__line__', line))
+
             if field == 'join_conditions':
-                if not validate_list(union[field], 'join_conditions', line, logger):
+                if not validate_list(union[field], 'join_conditions', field_line, logger):
+                    return False
+            elif field == 'having':
+                # Validate HAVING as a string
+                if not validate_string(union[field], 'having', field_line, logger):
                     return False
             elif isinstance(union[field], list):
-                if not validate_list(union[field], field, line, logger):
+                if not validate_list(union[field], field, field_line, logger):
                     return False
             elif isinstance(union[field], str):
-                if not validate_string(union[field], field, line, logger):
+                if not validate_string(union[field], field, field_line, logger):
                     return False
 
     return True
@@ -134,29 +150,28 @@ def validate_yaml(data, logger):
         'unions': list  # Optional
     }
 
-    # Validate required fields and their types, and ensure no empty strings
+    # Validate required fields and their types, and ensure no empty strings or empty lists
     for field, field_type in required_fields.items():
         if field in data:
+            line = data.get(f"__{field}_line__", data.get('__line__', 'Unknown'))
+
             if not isinstance(data[field], field_type):
-                line = data.get('__line__', 'Unknown')
                 logger.error(f"Validation Error: Field '{field}' must be of type {field_type.__name__}, got {type(data[field]).__name__} at line {line}.")
                 return False
 
             # Validate string fields
             if field_type == str:
-                line = data.get('__line__', 'Unknown')
                 if not validate_string(data[field], field, line, logger):
                     return False
 
             # Validate list fields
             if field_type == list:
-                line = data.get('__line__', 'Unknown')
                 if not validate_list(data[field], field, line, logger):
                     return False
         else:
             # If the field is not present but is required, log the error
             if field not in ['where_conditions', 'group_by', 'having', 'order_by', 'join_conditions', 'unions']:
-                logger.error(f"Validation Error: Missing required field '{field}'.")
+                logger.error(f"Validation Error: Missing required field '{field}' at line {line}.")
                 return False
 
     # Validate unions, if present
