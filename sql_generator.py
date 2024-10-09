@@ -1,3 +1,4 @@
+import argparse  
 import yaml
 import logging
 import os
@@ -11,12 +12,14 @@ def generate_join_clause(joins):
     for join in joins:
         join_type = join.get('join_type', '').upper()
         join_table = join.get('join_table', '')
-        if join_type in ["CROSS", "CROSS JOIN"]:
-            join_clause += f"{join_type} {join_table} "
+        if join_type == "CROSS" or join_type == "CROSS JOIN":
+            join_clause += f"CROSS JOIN {join_table} "
         else:
             join_condition = join.get('join_condition', '')
             join_clause += f"{join_type} JOIN {join_table} ON {join_condition} "
+    
     return join_clause
+
 
 # Helper function to extract values from lists (e.g., select_columns, group_by, order_by)
 def extract_list_values(data_list):
@@ -68,7 +71,7 @@ def generate_union_clauses(unions):
     return union_sql
 
 # Function to generate SQL from YAML
-def generate_sql_from_yaml_file(file_path, logger):
+def generate_sql_from_yaml_file(file_path, output_dir, logger):
     try:
         with open(file_path, 'r') as file:
             data = yaml.load(file, Loader=LineLoader)
@@ -97,6 +100,16 @@ def generate_sql_from_yaml_file(file_path, logger):
         # Clean up SQL and log the result
         sql_query = sql_query.strip()
         logger.info(f"Generated SQL: {sql_query}")
+
+        # Create the output SQL file path using the base name of the YAML file
+        base_name = os.path.splitext(os.path.basename(file_path))[0]  # Get base name without extension
+        sql_file_path = os.path.join(output_dir, f"{base_name}.sql")  # Combine with output directory
+
+        # Write the generated SQL to the specified .sql file
+        with open(sql_file_path, 'w') as sql_file:
+            sql_file.write(sql_query)
+        logger.info(f"SQL written to {sql_file_path}")
+
         return sql_query
 
     except yaml.YAMLError as e:
@@ -106,9 +119,24 @@ def generate_sql_from_yaml_file(file_path, logger):
         logger.error(f"Error generating SQL: {e}")
         return None
 
+
+
 # Main execution
 if __name__ == "__main__": 
+    # Set up argument parsing
+    # parser = argparse.ArgumentParser(description='Generate SQL from a YAML file.')
+    # parser.add_argument('yaml_file_path', type=str, help='Path to the input YAML file')
+    # parser.add_argument('output_dir', type=str, help='Directory to save the output SQL file')
+    # parser.add_argument('log_file_path', type=str, help='Path to the log file directory')
+
+    # # Parse the command-line arguments
+    # args = parser.parse_args()
+    # yaml_file_path = args.yaml_file_path
+    # output_dir = args.output_dir  # Get output directory from arguments
+    # log_file_path = args.log_file_path 
     yaml_file_path = "C:\\Users\\balaji kunchala\\Documents\\sample.yaml"
+    output_dir = "C:\\Users\\balaji kunchala\\Documents\\sql_generator\\sql"
+
     loginput_path = "C:\\Users\\balaji kunchala\\Documents\\sql_generator\\logs"
 
     if not os.path.exists(loginput_path):
@@ -117,7 +145,7 @@ if __name__ == "__main__":
     logger = setup_logging(yaml_file_path, loginput_path)
 
     # Generate SQL from YAML if validation passes
-    generated_sql = generate_sql_from_yaml_file(yaml_file_path, logger)
+    generated_sql = generate_sql_from_yaml_file(yaml_file_path, output_dir, logger)  # Pass output_dir here
 
     if generated_sql:
         print("Generated SQL:\n", generated_sql)
