@@ -18,6 +18,13 @@ def generate_join_clause(joins):
             join_clause += f"{join_type} JOIN {join_table} ON {join_condition} "
     return join_clause
 
+# Helper function to extract values from lists (e.g., select_columns, group_by, order_by)
+def extract_list_values(data_list):
+    return [
+        item['value'] if isinstance(item, dict) and 'value' in item else item
+        for item in data_list
+    ]
+
 # Helper function to handle common SQL clauses (WHERE, GROUP BY, HAVING, ORDER BY)
 def generate_sql_clauses(data):
     sql_clauses = ""
@@ -28,7 +35,8 @@ def generate_sql_clauses(data):
 
     # Add GROUP BY clause
     if 'group_by' in data and data['group_by']:
-        sql_clauses += "GROUP BY " + ', '.join(data['group_by']) + ' '
+        group_by_columns = extract_list_values(data['group_by'])
+        sql_clauses += "GROUP BY " + ', '.join(group_by_columns) + ' '
 
     # Add HAVING clause
     if 'having' in data and data['having']:
@@ -36,7 +44,8 @@ def generate_sql_clauses(data):
 
     # Add ORDER BY clause
     if 'order_by' in data and data['order_by']:
-        sql_clauses += "ORDER BY " + ', '.join(data['order_by']) + ' '
+        order_by_columns = extract_list_values(data['order_by'])
+        sql_clauses += "ORDER BY " + ', '.join(order_by_columns) + ' '
 
     return sql_clauses
 
@@ -44,7 +53,8 @@ def generate_sql_clauses(data):
 def generate_union_clauses(unions):
     union_sql = ""
     for union in unions:
-        union_query = "SELECT " + ', '.join(union['select_columns']) + ' '
+        select_columns = extract_list_values(union['select_columns'])
+        union_query = "SELECT " + ', '.join(select_columns) + ' '
         union_query += f"FROM {union['table_name']} "
 
         # Add JOIN clauses in union
@@ -69,7 +79,8 @@ def generate_sql_from_yaml_file(file_path, logger):
             raise ValueError("YAML validation failed.")
 
         # Start constructing the SQL query after validation passes
-        sql_query = "SELECT " + ', '.join(data['select_columns']) + ' '
+        select_columns = extract_list_values(data['select_columns'])
+        sql_query = "SELECT " + ', '.join(select_columns) + ' '
         sql_query += f"FROM {data['table_name']} "
 
         # Add JOIN clauses
@@ -96,7 +107,7 @@ def generate_sql_from_yaml_file(file_path, logger):
         return None
 
 # Main execution
-if __name__ == "__main__":
+if __name__ == "__main__": 
     yaml_file_path = "C:\\Users\\balaji kunchala\\Documents\\sample.yaml"
     loginput_path = "C:\\Users\\balaji kunchala\\Documents\\sql_generator\\logs"
 
