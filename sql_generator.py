@@ -1,5 +1,7 @@
 import argparse  
 import yaml
+import sqlparse
+import sqlglot
 import logging
 import os
 import sys
@@ -101,16 +103,27 @@ def generate_sql_from_yaml_file(file_path, output_dir, logger):
         sql_query = sql_query.strip()
         logger.info(f"Generated SQL: {sql_query}")
 
+        # SQL Validation using sqlglot
+        try:
+            sqlglot.parse(sql_query)  # Validate SQL
+            logger.info("SQL is valid.")
+        except Exception as e:
+            logger.error(f"Generated SQL is invalid: {e}")
+            raise ValueError(f"Generated SQL validation failed: {str(e)}")
+
+        # Format the SQL query using sqlparse
+        formatted_sql = sqlparse.format(sql_query, reindent=True, keyword_case='upper')
+
         # Create the output SQL file path using the base name of the YAML file
         base_name = os.path.splitext(os.path.basename(file_path))[0]  # Get base name without extension
         sql_file_path = os.path.join(output_dir, f"{base_name}.sql")  # Combine with output directory
 
-        # Write the generated SQL to the specified .sql file
+        # Write the formatted SQL to the specified .sql file
         with open(sql_file_path, 'w') as sql_file:
-            sql_file.write(sql_query)
+            sql_file.write(formatted_sql)  # Write the formatted SQL
         logger.info(f"SQL written to {sql_file_path}")
 
-        return sql_query
+        return formatted_sql
 
     except yaml.YAMLError as e:
         logger.error(f"Error parsing YAML: {e}")
@@ -118,7 +131,6 @@ def generate_sql_from_yaml_file(file_path, output_dir, logger):
     except Exception as e:
         logger.error(f"Error generating SQL: {e}")
         return None
-
 
 
 # Main execution
@@ -134,7 +146,7 @@ if __name__ == "__main__":
     # yaml_file_path = args.yaml_file_path
     # output_dir = args.output_dir  # Get output directory from arguments
     # log_file_path = args.log_file_path 
-    yaml_file_path = "C:\\Users\\balaji kunchala\\Documents\\sample.yaml"
+    yaml_file_path = "C:\\Users\\balaji kunchala\\Documents\\sample2.yaml"
     output_dir = "C:\\Users\\balaji kunchala\\Documents\\sql_generator\\sql"
 
     loginput_path = "C:\\Users\\balaji kunchala\\Documents\\sql_generator\\logs"
