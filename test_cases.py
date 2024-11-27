@@ -10,6 +10,7 @@ class ETLTestCases(unittest.TestCase):
         cls.spark = None
         cls.config = None
         cls.file_paths = None
+        cls.logger = None
 
     def _load_sample_data(self):
 
@@ -28,7 +29,7 @@ class ETLTestCases(unittest.TestCase):
         self._load_sample_data()
 
         # Run extraction
-        extract_data_lumi(self.spark, self.config.queries["extract"])
+        extract_data_lumi(self.spark, self.logger, self.config.queries["extract"])
 
         # Validate extraction views
         for query in self.config.queries["extract"]:
@@ -38,7 +39,7 @@ class ETLTestCases(unittest.TestCase):
             )
 
         # Run transformations
-        execute_transform_queries(self.spark, self.config.queries)
+        execute_transform_queries(self.spark, self.config.queries, self.logger)
 
         # Validate transformation views
         for query in self.config.queries["transform"]:
