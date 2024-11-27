@@ -1,0 +1,62 @@
+name: ETL Pipeline Testing with PySpark
+
+on:
+  push:
+    branches: [ "main", "ci/*" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  etl-tests:
+    name: Run ETL Tests with PySpark
+    runs-on: aexp-ubuntu-latest-medium
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Verify Java Installation
+        run: java -version
+
+      - name: Install Apache Spark
+        run: |
+          wget https://downloads.apache.org/spark/spark-3.4.1/spark-3.4.1-bin-hadoop3.tgz
+          tar xvf spark-3.4.1-bin-hadoop3.tgz
+          sudo mv spark-3.4.1-bin-hadoop3 /usr/local/spark
+          echo "export SPARK_HOME=/usr/local/spark" >> $GITHUB_ENV
+          echo "export PATH=/usr/local/spark/bin:$PATH" >> $GITHUB_ENV
+          echo "export PYSPARK_PYTHON=python3" >> $GITHUB_ENV
+
+      - name: Verify Spark Installation
+        run: /usr/local/spark/bin/spark-submit --version
+
+      - name: Verify Environment Variables
+        run: |
+          echo $SPARK_HOME
+          echo $PATH
+          echo $PYSPARK_PYTHON
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          
+
+      - name: Install Python Dependencies
+        run: pip install -r requirements.txt || pip install -r requirements.txt
+
+      - name: Verify Data Files
+        run: ls -al data/
+
+      - name: Run ETL Tests for Config1
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python run_tests/run_test_config1.py
