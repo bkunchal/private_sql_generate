@@ -23,26 +23,11 @@ jobs:
           distribution: 'temurin'
           java-version: '11'
 
+      - name: Set JAVA_HOME
+        run: echo "JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> $GITHUB_ENV
+
       - name: Verify Java Installation
         run: java -version
-
-      - name: Install Apache Spark
-        run: |
-          wget https://downloads.apache.org/spark/spark-3.4.1/spark-3.4.1-bin-hadoop3.tgz
-          tar xvf spark-3.4.1-bin-hadoop3.tgz
-          sudo mv spark-3.4.1-bin-hadoop3 /usr/local/spark
-          echo "export SPARK_HOME=/usr/local/spark" >> $GITHUB_ENV
-          echo "export PATH=/usr/local/spark/bin:$PATH" >> $GITHUB_ENV
-          echo "export PYSPARK_PYTHON=python3" >> $GITHUB_ENV
-
-      - name: Verify Spark Installation
-        run: /usr/local/spark/bin/spark-submit --version
-
-      - name: Verify Environment Variables
-        run: |
-          echo $SPARK_HOME
-          echo $PATH
-          echo $PYSPARK_PYTHON
 
       - name: Set up Python
         uses: actions/setup-python@v4
