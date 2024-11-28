@@ -1,5 +1,4 @@
 import unittest
-from src.extract_data import extract_data_lumi
 from src.transform_data import execute_transform_queries
 
 
@@ -11,9 +10,6 @@ class ETLTestCases(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """
-        Ensure class attributes are correctly initialized.
-        """
         print("DEBUG: setUpClass - Config:", cls.config)  # Debugging config
         assert cls.config is not None, "config must be set before running tests"
         assert cls.spark is not None, "Spark session must be set before running tests"
@@ -21,17 +17,12 @@ class ETLTestCases(unittest.TestCase):
         assert cls.logger is not None, "logger must be set before running tests"
 
     def _load_sample_data(self):
-        """
-        Load sample data from file paths into temporary Spark views.
-        """
         self.assertIsNotNone(self.file_paths, "file_paths is not initialized")
         self.assertGreater(len(self.file_paths), 0, "file_paths is empty")
 
         for table_name, file_path in self.file_paths.items():
             if not file_path:
                 raise FileNotFoundError(f"Data file for '{table_name}' is missing or not set")
-            
-            # Load the CSV file into a Spark DataFrame
             try:
                 df = self.spark.read.csv(file_path, header=True, inferSchema=True)
                 df.createOrReplaceTempView(table_name)
@@ -39,24 +30,34 @@ class ETLTestCases(unittest.TestCase):
             except Exception as e:
                 raise RuntimeError(f"Failed to load data for table '{table_name}': {e}")
 
+    def _mock_extract_data_lumi(self):
+        self.assertIsNotNone(self.config, "config is not initialized")
+        extract_queries = self.config.get("queries", {}).get("extract", [])
+        self.assertGreater(len(extract_queries), 0, "No extract queries found in config")
+
+        for query_info in extract_queries:
+            table_name = query_info["name"]
+            query = query_info["query"]
+
+            try:
+                # Execute the query on the pre-loaded temporary views
+                self.logger.info(f"Executing extract query for '{table_name}': {query}")
+                df = self.spark.sql(query)
+                df.createOrReplaceTempView(table_name)
+                self.logger.info(f"Temp view created for extracted table '{table_name}'")
+            except Exception as e:
+                raise RuntimeError(f"Failed to execute extract query for '{table_name}': {e}")
+
     def test_etl_pipeline(self):
-        """
-        Test the full ETL pipeline:
-        - Load sample data
-        - Run extract queries
-        - Run transform queries
-        """
         print("DEBUG: test_etl_pipeline - Config:", self.config)
         self.assertIsNotNone(self.config, "config is not initialized")
         queries = self.config.get("queries", {})
         self.assertIn("extract", queries, "config does not contain 'extract' queries")
         self.assertIn("transform", queries, "config does not contain 'transform' queries")
 
-        # Load sample data
         self._load_sample_data()
 
-        # Run extraction
-        extract_data_lumi(self.spark, self.logger, queries["extract"])
+        self._mock_extract_data_lumi()
 
         # Validate extracted views
         for query in queries["extract"]:
@@ -76,11 +77,6 @@ class ETLTestCases(unittest.TestCase):
             )
 
     def test_load_simulation(self):
-        """
-        Test the load simulation:
-        - Validate the final DataFrame is created
-        - Validate the load configuration
-        """
         print("DEBUG: test_load_simulation - Config:", self.config)
         queries = self.config.get("queries", {})
         self.assertIn("load", queries, "config does not contain 'load' queries")
