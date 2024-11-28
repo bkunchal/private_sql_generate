@@ -27,6 +27,8 @@ class ETLTestCases(unittest.TestCase):
                 df = self.spark.read.csv(file_path, header=True, inferSchema=True)
                 df.createOrReplaceTempView(table_name)
                 self.logger.info(f"Loaded data for table '{table_name}' from '{file_path}'")
+                self.logger.info(f"Schema of table '{table_name}': {df.schema}")
+                df.show()
             except Exception as e:
                 raise RuntimeError(f"Failed to load data for table '{table_name}': {e}")
 
@@ -40,6 +42,8 @@ class ETLTestCases(unittest.TestCase):
             query = query_info["query"]
 
             try:
+                self.logger.info(f"Checking columns in 'my_table':")
+                self.spark.sql("SELECT * FROM my_table").show()
                 # Execute the query on the pre-loaded temporary views
                 self.logger.info(f"Executing extract query for '{table_name}': {query}")
                 df = self.spark.sql(query)
