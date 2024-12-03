@@ -32,6 +32,13 @@ class ETLTestCases(unittest.TestCase):
             except Exception as e:
                 raise RuntimeError(f"Failed to load data for table '{table_name}': {e}")
 
+    def _validate_sql_syntax(self, query):
+        try:
+            self.spark.sql(f"EXPLAIN {query}")
+            return True
+        except Exception as e:
+            return str(e)
+
     def _mock_extract_data_lumi(self):
         self.assertIsNotNone(self.config, "config is not initialized")
         extract_queries = self.config.get("queries", {}).get("extract", [])
@@ -41,10 +48,13 @@ class ETLTestCases(unittest.TestCase):
             table_name = query_info["name"]
             query = query_info["query"]
 
+            # Validate SQL syntax
+            syntax_error = self._validate_sql_syntax(query)
+            if syntax_error is not True:
+                raise RuntimeError(f"Syntax error in extract query '{table_name}': {syntax_error}")
+
+            # Execute the query on the pre-loaded temporary views
             try:
-                self.logger.info(f"Checking columns in 'my_table':")
-                self.spark.sql("SELECT * FROM my_table").show()
-                # Execute the query on the pre-loaded temporary views
                 self.logger.info(f"Executing extract query for '{table_name}': {query}")
                 df = self.spark.sql(query)
                 df.createOrReplaceTempView(table_name)
@@ -69,6 +79,12 @@ class ETLTestCases(unittest.TestCase):
                 self.spark.catalog.tableExists(query["name"]),
                 f"Extracted view '{query['name']}' was not created"
             )
+
+        # Validate SQL syntax for transformations
+        for query in queries["transform"]:
+            syntax_error = self._validate_sql_syntax(query["query"])
+            if syntax_error is not True:
+                raise RuntimeError(f"Syntax error in transform query '{query['name']}': {syntax_error}")
 
         # Run transformations
         execute_transform_queries(self.spark, queries["transform"], self.logger)
