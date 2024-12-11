@@ -1,4 +1,5 @@
 import unittest
+from pyspark.sql import DataFrame
 from src.transform_data import execute_transform_queries
 
 
@@ -10,29 +11,71 @@ class ETLTestCases(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        """
+        Validates the essential class-level attributes before running any tests.
+        """
         print("DEBUG: setUpClass - Config:", cls.config)  # Debugging config
-        assert cls.config is not None, "config must be set before running tests"
-        assert cls.spark is not None, "Spark session must be set before running tests"
-        assert cls.file_paths is not None, "file_paths must be set before running tests"
-        assert cls.logger is not None, "logger must be set before running tests"
+        assert cls.config, "Config must be set before running tests"
+        assert cls.spark, "Spark session must be set before running tests"
+        assert cls.file_paths, "File paths must be set before running tests"
+        assert cls.logger, "Logger must be set before running tests"
 
     def _load_sample_data(self):
-        self.assertIsNotNone(self.file_paths, "file_paths is not initialized")
-        self.assertGreater(len(self.file_paths), 0, "file_paths is empty")
+        """
+        Parses a single input CSV file containing multiple sections, splitting it into temporary views.
+        """
+        input_file_path = self.file_paths.get("input_data")
+        if not input_file_path:
+            raise FileNotFoundError("Input data file is not provided.")
 
-        for table_name, file_path in self.file_paths.items():
-            if not file_path:
-                raise FileNotFoundError(f"Data file for '{table_name}' is missing or not set")
-            try:
-                df = self.spark.read.csv(file_path, header=True, inferSchema=True)
-                df.createOrReplaceTempView(table_name)
-                self.logger.info(f"Loaded data for table '{table_name}' from '{file_path}'")
-                self.logger.info(f"Schema of table '{table_name}': {df.schema}")
-                df.show()
-            except Exception as e:
-                raise RuntimeError(f"Failed to load data for table '{table_name}': {e}")
+        try:
+            with open(input_file_path, "r") as file:
+                lines = file.readlines()
+
+            current_table = None
+            table_data = []
+
+            for line in lines:
+                line = line.strip()
+                if line.startswith("[") and line.endswith("]"):
+                    # Process the previous table's data
+                    if current_table and table_data:
+                        self._create_temp_view(current_table, table_data)
+                        table_data = []
+
+                    current_table = line.strip("[]")  # Extract the table name
+                elif current_table and line:
+                    table_data.append(line)
+
+            # Process the last table's data
+            if current_table and table_data:
+                self._create_temp_view(current_table, table_data)
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to load input data: {e}")
+
+    def _create_temp_view(self, table_name, table_data):
+        """
+        Converts a table section into a Spark DataFrame and creates a temporary view.
+        """
+        try:
+            # Split the first row as headers and the subsequent rows as data
+            headers = table_data[0].split(",")
+            data = [row.split(",") for row in table_data[1:]]
+            df = self.spark.createDataFrame(data, schema=headers)
+            df.createOrReplaceTempView(table_name)
+
+            self.logger.info(f"Temp view '{table_name}' created successfully")
+            self.logger.info(f"Schema for '{table_name}': {df.schema}")
+            df.show()
+        except Exception as e:
+            self.logger.error(f"Failed to create temp view for '{table_name}': {e}")
+            raise
 
     def _validate_sql_syntax(self, query):
+        """
+        Validates SQL syntax by running the EXPLAIN command on the query.
+        """
         try:
             self.spark.sql(f"EXPLAIN {query}")
             return True
@@ -40,74 +83,79 @@ class ETLTestCases(unittest.TestCase):
             return str(e)
 
     def _mock_extract_data_lumi(self):
-        self.assertIsNotNone(self.config, "config is not initialized")
+        """
+        Simulates the "Extract" phase by executing extract queries on the temporary views.
+        """
         extract_queries = self.config.get("queries", {}).get("extract", [])
-        self.assertGreater(len(extract_queries), 0, "No extract queries found in config")
+        assert extract_queries, "No extract queries found in config"
 
         for query_info in extract_queries:
             table_name = query_info["name"]
             query = query_info["query"]
 
-            # Validate SQL syntax
             syntax_error = self._validate_sql_syntax(query)
             if syntax_error is not True:
                 raise RuntimeError(f"Syntax error in extract query '{table_name}': {syntax_error}")
 
-            # Execute the query on the pre-loaded temporary views
             try:
                 self.logger.info(f"Executing extract query for '{table_name}': {query}")
                 df = self.spark.sql(query)
                 df.createOrReplaceTempView(table_name)
-                self.logger.info(f"Temp view created for extracted table '{table_name}'")
+                self.logger.info(f"Temp view '{table_name}' created successfully after extraction")
             except Exception as e:
-                raise RuntimeError(f"Failed to execute extract query for '{table_name}': {e}")
+                self.logger.error(f"Failed to execute extract query for '{table_name}': {e}")
+                raise
 
     def test_etl_pipeline(self):
-        print("DEBUG: test_etl_pipeline - Config:", self.config)
-        self.assertIsNotNone(self.config, "config is not initialized")
-        queries = self.config.get("queries", {})
-        self.assertIn("extract", queries, "config does not contain 'extract' queries")
-        self.assertIn("transform", queries, "config does not contain 'transform' queries")
-
+        """
+        Executes the ETL pipeline:
+        - Loads sample data
+        - Runs extract queries
+        - Validates transformations
+        """
         self._load_sample_data()
-
         self._mock_extract_data_lumi()
 
+        queries = self.config.get("queries", {})
+        extract_queries = queries.get("extract", [])
+        transform_queries = queries.get("transform", [])
+
         # Validate extracted views
-        for query in queries["extract"]:
+        for query in extract_queries:
+            table_name = query["name"]
             self.assertTrue(
-                self.spark.catalog.tableExists(query["name"]),
-                f"Extracted view '{query['name']}' was not created"
+                self.spark.catalog.tableExists(table_name),
+                f"Extracted view '{table_name}' was not created"
             )
 
-        # Validate SQL syntax for transformations
-        for query in queries["transform"]:
+        # Validate and execute transformations
+        for query in transform_queries:
             syntax_error = self._validate_sql_syntax(query["query"])
             if syntax_error is not True:
                 raise RuntimeError(f"Syntax error in transform query '{query['name']}': {syntax_error}")
 
-        # Run transformations
-        execute_transform_queries(self.spark, queries["transform"], self.logger)
+        execute_transform_queries(self.spark, transform_queries, self.logger)
 
         # Validate transformed views
-        for query in queries["transform"]:
+        for query in transform_queries:
             self.assertTrue(
                 self.spark.catalog.tableExists(query["name"]),
                 f"Transformed view '{query['name']}' was not created"
             )
 
     def test_load_simulation(self):
-        print("DEBUG: test_load_simulation - Config:", self.config)
+        """
+        Simulates the "Load" phase by verifying the final DataFrame.
+        """
         queries = self.config.get("queries", {})
-        self.assertIn("load", queries, "config does not contain 'load' queries")
-        load_config = queries["load"][0]
+        load_config = queries.get("load", [{}])[0]
 
         dataframe_name = load_config.get("dataframe_name")
-        self.assertIsNotNone(dataframe_name, "dataframe_name is not specified in the load configuration")
+        assert dataframe_name, "dataframe_name is not specified in the load configuration"
 
         try:
             final_df = self.spark.sql(f"SELECT * FROM {dataframe_name}")
             self.assertGreater(final_df.count(), 0, f"The DataFrame '{dataframe_name}' is empty")
-            self.logger.info(f"Successfully retrieved the final DataFrame '{dataframe_name}' with {final_df.count()} rows")
+            self.logger.info(f"Final DataFrame '{dataframe_name}' retrieved successfully with {final_df.count()} rows")
         except Exception as e:
             self.fail(f"Failed to retrieve the final DataFrame '{dataframe_name}': {e}")
