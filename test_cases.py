@@ -22,14 +22,19 @@ class ETLTestCases(unittest.TestCase):
 
     def _load_sample_data(self):
         """
-        Parses a single input CSV file containing multiple sections, splitting it into temporary views.
+        Reads multiple input files with table sections and creates temporary views.
         """
-        input_file_path = self.file_paths.get("input_data")
-        if not input_file_path:
-            raise FileNotFoundError("Input data file is not provided.")
+        assert self.file_paths, "No file paths provided for loading data"
 
+        for file_path in self.file_paths.values():
+            self._process_sectioned_file(file_path)
+
+    def _process_sectioned_file(self, file_path):
+        """
+        Processes a single file containing multiple table sections and creates temporary views.
+        """
         try:
-            with open(input_file_path, "r") as file:
+            with open(file_path, "r") as file:
                 lines = file.readlines()
 
             current_table = None
@@ -52,7 +57,8 @@ class ETLTestCases(unittest.TestCase):
                 self._create_temp_view(current_table, table_data)
 
         except Exception as e:
-            raise RuntimeError(f"Failed to load input data: {e}")
+            self.logger.error(f"Failed to process sectioned file '{file_path}': {e}")
+            raise RuntimeError(f"Error processing file '{file_path}': {e}")
 
     def _create_temp_view(self, table_name, table_data):
         """
