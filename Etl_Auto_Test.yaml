@@ -8,14 +8,17 @@ on:
 
 jobs:
   etl-tests:
-    name: Run ETL Tests with PySpark
-    runs-on: aexp-ubuntu-latest-medium
+    name: Run ETL Tests for Modified Tables
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Set up Java
         uses: actions/setup-java@v3
@@ -33,15 +36,48 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.8'
-          
 
       - name: Install Python Dependencies
         run: pip install -r requirements.txt || pip install -r requirements.txt
 
-      - name: Verify Data Files
-        run: ls -al data/
+      - name: Identify Changed Files
+        id: changed-files
+        run: |
+          git diff --name-only ${{ github.event.before }} ${{ github.sha }} > changed_files.txt
+          echo "Changed files:"
+          cat changed_files.txt
 
-      - name: Run ETL Tests for Config1
+      - name: Determine Affected Tables from Mapping
+        id: affected-tables
+        run: |
+          # Load the mapping document
+          MAPPING=$(cat table_mapping.json)
+
+          # Extract changed files
+          CONFIG_FILES=$(grep -E "configs/config_.*\.py" changed_files.txt || true)
+          TEST_FILES=$(grep -E "run_tests/run_test_.*\.py" changed_files.txt || true)
+
+          # Determine affected tables
+          AFFECTED_TABLES=""
+          for table in $(echo $MAPPING | jq -r 'keys[]'); do
+            CONFIG=$(echo $MAPPING | jq -r ".\"$table\".config")
+            TEST=$(echo $MAPPING | jq -r ".\"$table\".test")
+
+            if echo "$CONFIG_FILES" | grep -q "$CONFIG" && echo "$TEST_FILES" | grep -q "$TEST"; then
+              AFFECTED_TABLES="$AFFECTED_TABLES $table"
+            fi
+          done
+
+          echo "affected_tables=$AFFECTED_TABLES" >> $GITHUB_OUTPUT
+
+      - name: Run Tests for Affected Tables
+        if: steps.affected-tables.outputs.affected_tables
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python run_tests/run_test_config1.py
+        run: |
+          MAPPING=$(cat table_mapping.json)
+          for table in ${{ steps.affected-tables.outputs.affected_tables }}; do
+            TEST_FILE=$(echo $MAPPING | jq -r ".\"$table\".test")
+            echo "Running tests for table: $table using $TEST_FILE"
+            python $TEST_FILE
+          done
