@@ -2,11 +2,11 @@ name: ETL Pipeline Testing with PySpark
 
 on:
   push:
-    branches: 
+    branches:
       - "main"
       - "ci/*"
   pull_request:
-    branches: 
+    branches:
       - "main"
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
@@ -40,53 +40,46 @@ jobs:
           ls -al $JAVA_HOME
           java -version
 
-      - name: Setup Python Environment
-        uses: amex-eng/setup-python@v1
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.13
-          token: ${{ secrets.GH_NOSCOPE_TOKEN }}
+          python-version: '3.8'
 
       - name: Install Python Dependencies
-        run: pip install -r requirements.txt || pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
-      - name: Identify Changed Files
-        id: changed-files
+      - name: Identify Changed Files Dynamically
+        id: identify-changed-files
         run: |
-          git diff --name-only ${{ github.event.before }} ${{ github.sha }} > changed_files.txt
-          echo "Changed files:"
-          cat changed_files.txt
+          # Fetch the last two commits to check for differences
+          git fetch origin HEAD~1:refs/remotes/origin/prev && git fetch origin HEAD
+          # Compare the last two commits to identify changed files
+          changed_files=$(git diff --name-only origin/prev HEAD)
+          echo "Changed files: $changed_files"
+          echo "::set-output name=changed_files::$changed_files"
 
-      - name: Determine Affected Tables from Mapping
-        id: affected-tables
+      - name: Determine Affected Tests from Mapping
+        id: determine-affected-tests
         run: |
-          # Load the mapping document
-          MAPPING=$(cat table_mapping.json)
-
-          # Extract changed files
-          CONFIG_FILES=$(grep -E "configs/config_.*\.py" changed_files.txt || true)
-          TEST_FILES=$(grep -E "test/commons/run_test_.*\.py" changed_files.txt || true)
-
-          # Determine affected tables
-          AFFECTED_TABLES=""
-          for table in $(echo $MAPPING | jq -r 'keys[]'); do
-            CONFIG=$(echo $MAPPING | jq -r ".\"$table\".config")
-            TEST=$(echo $MAPPING | jq -r ".\"$table\".test")
-
-            if echo "$CONFIG_FILES" | grep -q "$CONFIG" && echo "$TEST_FILES" | grep -q "$TEST"; then
-              AFFECTED_TABLES="$AFFECTED_TABLES $table"
+          echo "Determining affected tests based on changed files..."
+          affected_tests=()
+          for file in ${{ steps.identify-changed-files.outputs.changed_files }}; do
+            echo "Checking file: $file"
+            test_file=$(jq --arg changed_file "$file" -r '
+              to_entries[] | select(.value.config == $changed_file or .value.test == $changed_file) | .value.test
+            ' mapping.json)
+            if [ "$test_file" != "null" ]; then
+              affected_tests+=("$test_file")
             fi
           done
-
-          echo "affected_tables=$AFFECTED_TABLES" >> $GITHUB_OUTPUT
+          echo "Affected tests: ${affected_tests[@]}"
+          echo "::set-output name=affected_tests::${affected_tests[@]}"
 
       - name: Run Tests for Affected Tables
-        if: steps.affected-tables.outputs.affected_tables
-        env:
-          PYTHONPATH: ${{ github.workspace }}
+        if: steps.determine-affected-tests.outputs.affected_tests != ''
         run: |
-          MAPPING=$(cat table_mapping.json)
-          for table in ${{ steps.affected-tables.outputs.affected_tables }}; do
-            TEST_FILE=$(echo $MAPPING | jq -r ".\"$table\".test")
-            echo "Running tests for table: $table using $TEST_FILE"
-            python $TEST_FILE
+          echo "Running affected tests..."
+          for test_file in ${{ steps.determine-affected-tests.outputs.affected_tests }}; do
+            echo "Running: $test_file"
+            python "$test_file"
           done
