@@ -12,7 +12,7 @@ on:
 jobs:
   etl-tests:
     name: Run ETL Tests with PySpark
-    runs-on: aexp-ubuntu-latest-medium
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repo
@@ -51,40 +51,35 @@ jobs:
       - name: Identify Changed Files Dynamically
         id: identify-changed-files
         run: |
-          # Fetch the previous commit
-          git fetch --no-tags --prune --depth=2 origin
+          # Fetch changes between the last two commits
           PREV_COMMIT=$(git rev-parse HEAD~1)
-
-          # Identify changed files between the last two commits
-          changed_files=$(git diff --name-only $PREV_COMMIT HEAD)
+          git diff --name-only $PREV_COMMIT HEAD > changed_files.txt
           echo "Changed files:"
-          echo "$changed_files"
-
-          # Export changed files as an environment variable
-          echo "changed_files=$changed_files" >> $GITHUB_ENV
+          cat changed_files.txt
+          echo "changed_files=$(cat changed_files.txt)" >> $GITHUB_ENV
 
       - name: Determine Affected Tests from Mapping
         id: determine-affected-tests
         run: |
           echo "Determining affected tests based on changed files..."
-          affected_tests=""
-          for file in ${{ env.changed_files }}; do
+          affected_tests=()
+          while IFS= read -r file; do
             echo "Checking file: $file"
             test_file=$(jq --arg changed_file "$file" -r '
               to_entries[] | select(.value.config == $changed_file or .value.test == $changed_file) | .value.test
-            ' Test_Cases_Mapping.json)
+            ' ./Test_Cases_Mapping.json)
             if [ "$test_file" != "null" ]; then
-              affected_tests="$affected_tests $test_file"
+              affected_tests+=("$test_file")
             fi
-          done
-          echo "Affected tests: $affected_tests"
-          echo "affected_tests=$affected_tests" >> $GITHUB_ENV
+          done < changed_files.txt
+          echo "Affected tests: ${affected_tests[@]}"
+          echo "affected_tests=${affected_tests[*]}" >> $GITHUB_ENV
 
       - name: Run Tests for Affected Tables
         if: env.affected_tests != ''
         run: |
           echo "Running affected tests..."
-          for test_file in ${{ env.affected_tests }}; do
+          for test_file in ${affected_tests}; do
             echo "Running: $test_file"
             python "$test_file"
           done
