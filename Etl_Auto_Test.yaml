@@ -51,11 +51,16 @@ jobs:
       - name: Identify Changed Files Dynamically
         id: identify-changed-files
         run: |
-          # Fetch the last two commits to check for differences
-          git fetch origin HEAD~1:refs/remotes/origin/main && git fetch origin HEAD
-          # Compare the last two commits to identify changed files
-          changed_files=$(git diff --name-only HEAD~1 HEAD)
-          echo "Changed files: $changed_files"
+          # Fetch the previous commit
+          git fetch --no-tags --prune --depth=2 origin
+          PREV_COMMIT=$(git rev-parse HEAD~1)
+
+          # Identify changed files between the last two commits
+          changed_files=$(git diff --name-only $PREV_COMMIT HEAD)
+          echo "Changed files:"
+          echo "$changed_files"
+
+          # Export changed files as an environment variable
           echo "changed_files=$changed_files" >> $GITHUB_ENV
 
       - name: Determine Affected Tests from Mapping
@@ -63,7 +68,7 @@ jobs:
         run: |
           echo "Determining affected tests based on changed files..."
           affected_tests=""
-          while read -r file; do
+          for file in ${{ env.changed_files }}; do
             echo "Checking file: $file"
             test_file=$(jq --arg changed_file "$file" -r '
               to_entries[] | select(.value.config == $changed_file or .value.test == $changed_file) | .value.test
@@ -71,12 +76,12 @@ jobs:
             if [ "$test_file" != "null" ]; then
               affected_tests="$affected_tests $test_file"
             fi
-          done <<< "${{ env.changed_files }}"
+          done
           echo "Affected tests: $affected_tests"
           echo "affected_tests=$affected_tests" >> $GITHUB_ENV
 
       - name: Run Tests for Affected Tables
-        if: ${{ env.affected_tests != '' }}
+        if: env.affected_tests != ''
         run: |
           echo "Running affected tests..."
           for test_file in ${{ env.affected_tests }}; do
