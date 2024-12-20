@@ -15,43 +15,51 @@ jobs:
     runs-on: aexp-ubuntu-latest-medium
 
     steps:
+      # Step 1: Checkout the repository
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Step 2: Set up Python environment
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.8'
 
+      # Step 3: Install Python dependencies
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
 
-      - name: Identify Changed Files
-        id: identify-changed-files
-        run: |
-          echo "Fetching changed files..."
-          changed_files=$(git diff --name-only HEAD~1 HEAD)
-          echo "Changed files: $changed_files"
-          echo "changed_files=$changed_files" >> $GITHUB_ENV
+      # Step 4: Set PYTHONPATH to include the repository root
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=${PYTHONPATH}:${GITHUB_WORKSPACE}" >> $GITHUB_ENV
 
+      # Step 5: Debug Directory Structure
+      - name: Debug Directory Structure
+        run: |
+          echo "Directory structure:"
+          ls -R ${GITHUB_WORKSPACE}
+          echo "PYTHONPATH:"
+          echo $PYTHONPATH
+
+      # Step 6: Identify Affected Tests
       - name: Identify Affected Tests
         id: identify-affected-tests
-        run: |
-          echo "Determining affected tests using mapping file..."
-          python scripts/determine_tests.py --mapping-file ./Test_Cases_Mapping.json --changed-files "${{ env.changed_files }}"
-        env:
-          CHANGED_FILES: ${{ env.changed_files }}
+        run: python path/to/determine_tests.py
 
+      # Step 7: Run Tests for Affected Tables
       - name: Run Tests for Affected Tables
         if: steps.identify-affected-tests.outcome == 'success'
         run: |
           echo "Running affected tests..."
-          if [ -f "affected_tests.txt" ]; then
-            while IFS= read -r test_file; do
-              echo "Running: $test_file"
-              python "$test_file"
-            done < affected_tests.txt
-          else
-            echo "No affected tests found."
+          while IFS= read -r test_file; do
+            echo "Running: $test_file"
+            python "$test_file"
+          done < affected_tests.txt
+
+      # Post-Job: Clean up temporary files (if necessary)
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f affected_tests.txt
