@@ -12,33 +12,13 @@ on:
 jobs:
   etl-tests:
     name: Run ETL Tests with PySpark
-    runs-on: ubuntu-latest
+    runs-on: aexp-ubuntu-latest-medium
 
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Set up Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '11'
-
-      - name: Set JAVA_HOME
-        run: |
-          echo "JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))" >> $GITHUB_ENV
-          echo "PATH=$JAVA_HOME/bin:$PATH" >> $GITHUB_ENV
-
-      - name: Verify Java Installation
-        run: |
-          echo "JAVA_HOME=$JAVA_HOME"
-          ls -al $JAVA_HOME
-          java -version
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -48,38 +28,15 @@ jobs:
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
 
-      - name: Identify Changed Files Dynamically
-        id: identify-changed-files
-        run: |
-          # Fetch changes between the last two commits
-          PREV_COMMIT=$(git rev-parse HEAD~1)
-          git diff --name-only $PREV_COMMIT HEAD > changed_files.txt
-          echo "Changed files:"
-          cat changed_files.txt
-          echo "changed_files=$(cat changed_files.txt)" >> $GITHUB_ENV
-
-      - name: Determine Affected Tests from Mapping
-        id: determine-affected-tests
-        run: |
-          echo "Determining affected tests based on changed files..."
-          affected_tests=()
-          while IFS= read -r file; do
-            echo "Checking file: $file"
-            test_file=$(jq --arg changed_file "$file" -r '
-              to_entries[] | select(.value.config == $changed_file or .value.test == $changed_file) | .value.test
-            ' ./Test_Cases_Mapping.json)
-            if [ "$test_file" != "null" ]; then
-              affected_tests+=("$test_file")
-            fi
-          done < changed_files.txt
-          echo "Affected tests: ${affected_tests[@]}"
-          echo "affected_tests=${affected_tests[*]}" >> $GITHUB_ENV
+      - name: Identify Affected Tests
+        id: identify-affected-tests
+        run: python mapper.py
 
       - name: Run Tests for Affected Tables
-        if: env.affected_tests != ''
+        if: steps.identify-affected-tests.outcome == 'success'
         run: |
           echo "Running affected tests..."
-          for test_file in ${affected_tests}; do
+          while IFS= read -r test_file; do
             echo "Running: $test_file"
             python "$test_file"
-          done
+          done < affected_tests.txt
