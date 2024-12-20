@@ -28,15 +28,30 @@ jobs:
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
 
+      - name: Identify Changed Files
+        id: identify-changed-files
+        run: |
+          echo "Fetching changed files..."
+          changed_files=$(git diff --name-only HEAD~1 HEAD)
+          echo "Changed files: $changed_files"
+          echo "changed_files=$changed_files" >> $GITHUB_ENV
+
       - name: Identify Affected Tests
         id: identify-affected-tests
-        run: python mapper.py
+        run: |
+          echo "Determining affected tests using mapping file..."
+          python scripts/determine_tests.py --mapping-file ./Test_Cases_Mapping.json --changed-files "${{ env.changed_files }}"
+        env:
+          CHANGED_FILES: ${{ env.changed_files }}
 
       - name: Run Tests for Affected Tables
         if: steps.identify-affected-tests.outcome == 'success'
         run: |
           echo "Running affected tests..."
-          while IFS= read -r test_file; do
-            echo "Running: $test_file"
-            python "$test_file"
-          done < affected_tests.txt
+          if [ -f "affected_tests.txt" ]; then
+            while IFS= read -r test_file; do
+              echo "Running: $test_file"
+              python "$test_file"
+            done < affected_tests.txt
+          else
+            echo "No affected tests found."

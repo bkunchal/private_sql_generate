@@ -1,9 +1,13 @@
 import json
 import subprocess
 import sys
+import argparse
+import os
 
 def get_changed_files():
-
+    """
+    Get the list of changed files between the last two commits.
+    """
     try:
         # Fetch changes from the last two commits
         result = subprocess.run(
@@ -39,8 +43,20 @@ def determine_affected_tests(mapping_file, changed_files):
     return list(affected_tests)
 
 if __name__ == "__main__":
-    # Define the mapping file path
-    mapping_file = "Test_Cases_Mapping.json"
+    # Use argparse to accept the mapping file path as an argument
+    parser = argparse.ArgumentParser(description="Determine affected test cases.")
+    parser.add_argument(
+        "--mapping-file",
+        type=str,
+        help="Path to the Test_Cases_Mapping.json file. Can also be set via the MAPPING_FILE_PATH environment variable.",
+    )
+    args = parser.parse_args()
+
+    # Check if mapping file is provided via argument or environment variable
+    mapping_file = args.mapping_file or os.getenv("MAPPING_FILE_PATH")
+    if not mapping_file:
+        print("Error: The mapping file path must be provided either via --mapping-file argument or MAPPING_FILE_PATH environment variable.")
+        sys.exit(1)
 
     # Get the list of changed files
     changed_files = get_changed_files()
