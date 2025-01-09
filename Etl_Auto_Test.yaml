@@ -20,45 +20,59 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 2
 
-      # Step 2: Set up Python environment
+      # Step 2: Set up Java environment
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '8'
+
+      - name: Set JAVA_HOME
+        run: |
+          echo "JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))" >> $GITHUB_ENV
+          echo "PATH=$JAVA_HOME/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Verify Java Installation
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          ls -al $JAVA_HOME
+          java -version
+
+      # Step 3: Set up Python environment
+      - name: Setup Python Environment
+        id: setup-build-env
+        uses: amex-eng/setup-python@aab54f53bb40df9752c5a5a2dc6554fe581dd984
+        with:
+          python-version: 3.13
+          token: ${{ secrets.GH_NOSCOPE_TOKEN }}
+
+      - name: Python Build
+        id: python-build
+        run: pip3 install -r requirements.txt
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.8'
 
-      # Step 3: Install Python dependencies
-      - name: Install Python Dependencies
-        run: pip install -r requirements.txt
-
-      # Step 4: Set PYTHONPATH to include the repository root
-      - name: Set PYTHONPATH
+      # Step 4: Add repository to PYTHONPATH
+      - name: Add repository to PYTHONPATH
         run: echo "PYTHONPATH=${PYTHONPATH}:${GITHUB_WORKSPACE}" >> $GITHUB_ENV
 
-      # Step 5: Debug Directory Structure
-      - name: Debug Directory Structure
-        run: |
-          echo "Directory structure:"
-          ls -R ${GITHUB_WORKSPACE}
-          echo "PYTHONPATH:"
-          echo $PYTHONPATH
-
-      # Step 6: Identify Affected Tests
+      # Step 5: Generate affected_tests.txt using mapping.py
       - name: Identify Affected Tests
         id: identify-affected-tests
-        run: python path/to/determine_tests.py
+        run: python test/commons/mapping.py --mapping-file test/commons/Test_Cases_Mapping.json
 
-      # Step 7: Run Tests for Affected Tables
-      - name: Run Tests for Affected Tables
+      # Step 6: Run tests for affected files using the wrapper script
+      - name: Run Tests for Affected Files
         if: steps.identify-affected-tests.outcome == 'success'
-        run: |
-          echo "Running affected tests..."
-          while IFS= read -r test_file; do
-            echo "Running: $test_file"
-            python "$test_file"
-          done < affected_tests.txt
+        run: python run_wrapper.py
+        shell: bash
 
-      # Post-Job: Clean up temporary files (if necessary)
+      # Step 7: Cleanup
       - name: Cleanup
         if: always()
         run: |
