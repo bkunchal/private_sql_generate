@@ -42,9 +42,22 @@ def determine_affected_tests(mapping_file, changed_files):
 
     return list(affected_tests)
 
+def run_tests_for_affected_files(test_files):
+    """
+    Executes each affected test file as a standalone script.
+    """
+    for test_file in test_files:
+        print(f"Running tests in file: {test_file}")
+        try:
+            # Execute the test file as a standalone script
+            subprocess.run(["python", test_file], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Tests failed in {test_file}: {e}")
+            sys.exit(1)
+
 if __name__ == "__main__":
     # Use argparse to accept the mapping file path as an argument
-    parser = argparse.ArgumentParser(description="Determine affected test cases.")
+    parser = argparse.ArgumentParser(description="Determine and run affected test cases.")
     parser.add_argument(
         "--mapping-file",
         type=str,
@@ -66,14 +79,9 @@ if __name__ == "__main__":
     affected_tests = determine_affected_tests(mapping_file, changed_files)
     print("Affected tests:", affected_tests)
 
-    # Output affected tests to a file (optional)
-    with open("affected_tests.txt", "w") as f:
-        for test in affected_tests:
-            f.write(test + "\n")
-
-    # Exit with success if tests were found
-    if affected_tests:
+    if not affected_tests:
+        print("No affected tests to run. Exiting.")
         sys.exit(0)
-    else:
-        print("No affected tests found.")
-        sys.exit(1)
+
+    # Run the affected tests
+    run_tests_for_affected_files(affected_tests)
