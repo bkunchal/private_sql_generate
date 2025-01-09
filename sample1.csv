@@ -1,0 +1,26 @@
+[customer_data]
+customer_id,customer_name,region
+1,John,North
+2,Alice,South
+3,Bob,East
+4,Eve,West
+
+[order_data]
+order_id,customer_id,order_date,order_amount
+101,1,2023-01-01,100.0
+102,2,2023-01-05,200.0
+103,3,2023-01-10,150.0
+104,4,2023-01-15,250.0
+
+[product_table]
+product_id,product_name,category,price
+201,Widget A,Category 1,20.0
+202,Widget B,Category 2,30.0
+203,Widget C,Category 3,50.0
+
+[order_items_table]
+order_id,product_id,quantity
+101,201,2
+102,202,3
+103,203,1
+104,201,4

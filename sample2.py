@@ -2,11 +2,15 @@ queries = {
     "extract": [
         {
             "name": "customer_data",
-            "query": """SELECT customer_id, customer_name, region FROM customer_table"""
-        },
-        {
-            "name": "order_data",
-            "query": """SELECT order_id, customer_id, order_date, order_amount FROM order_table"""
+            "query": """SELECT 
+                    c.customer_id,
+                    c.customer_name,
+                    c.region,
+                    o.order_id,
+                    o.order_date,
+                    o.order_amount
+                FROM customer_data c
+                JOIN order_data o ON c.customer_id = o.customer_id"""
         },
         {
             "name": "product_data",
@@ -22,14 +26,13 @@ queries = {
             "name": "customer_orders",
             "query": """
                 SELECT 
-                    c.customer_id,
-                    c.customer_name,
-                    c.region,
-                    o.order_id,
-                    o.order_date,
-                    o.order_amount
-                FROM customer_data c
-                JOIN order_data o ON c.customer_id = o.customer_id
+                    customer_id,
+                    customer_name,
+                    region,
+                    order_id,
+                    order_date,
+                    order_amount
+                FROM customer_data 
             """
         },
         {
