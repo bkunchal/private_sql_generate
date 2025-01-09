@@ -1,29 +1,18 @@
+import subprocess
 import sys
-import unittest
 
 def run_tests_for_affected_files(test_files):
     """
-    Executes unit tests for a list of test files.
+    Executes each affected test file as a standalone script.
     """
-    all_tests = unittest.TestSuite()
-    loader = unittest.TestLoader()
-
     for test_file in test_files:
+        print(f"Running tests in file: {test_file}")
         try:
-            # Dynamically load tests from the specified file
-            tests = loader.discover(start_dir='.', pattern=test_file)
-            all_tests.addTests(tests)
-        except Exception as e:
-            print(f"Failed to load tests from {test_file}: {e}")
+            # Execute the test file as a standalone script
+            subprocess.run(["python", test_file], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Tests failed in {test_file}: {e}")
             sys.exit(1)
-
-    # Run all collected tests
-    runner = unittest.TextTestRunner()
-    result = runner.run(all_tests)
-
-    # Fail the script if any test fails
-    if not result.wasSuccessful():
-        sys.exit(1)
 
 if __name__ == "__main__":
     # Read affected test files from the file
