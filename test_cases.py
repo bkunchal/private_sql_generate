@@ -8,6 +8,8 @@ class ETLTestCases(unittest.TestCase):
     config = None
     file_paths = None
     logger = None
+    extract_key = "extract"  # Default key for extract module
+    transform_key = "transform"  # Default key for transform module
 
     @classmethod
     def setUpClass(cls):
@@ -20,16 +22,16 @@ class ETLTestCases(unittest.TestCase):
         assert cls.file_paths, "File paths must be set before running tests"
         assert cls.logger, "Logger must be set before running tests"
 
-    def _load_sample_data(self):
+    def load_sample_data(self):
         """
         Reads multiple input files with table sections and creates temporary views.
         """
         assert self.file_paths, "No file paths provided for loading data"
 
         for file_path in self.file_paths.values():
-            self._process_sectioned_file(file_path)
+            self.process_sectioned_file(file_path)
 
-    def _process_sectioned_file(self, file_path):
+    def process_sectioned_file(self, file_path):
         """
         Processes a single file containing multiple table sections and creates temporary views.
         """
@@ -45,7 +47,7 @@ class ETLTestCases(unittest.TestCase):
                 if line.startswith("[") and line.endswith("]"):
                     # Process the previous table's data
                     if current_table and table_data:
-                        self._create_temp_view(current_table, table_data)
+                        self.create_temp_view(current_table, table_data)
                         table_data = []
 
                     current_table = line.strip("[]")  # Extract the table name
@@ -54,13 +56,13 @@ class ETLTestCases(unittest.TestCase):
 
             # Process the last table's data
             if current_table and table_data:
-                self._create_temp_view(current_table, table_data)
+                self.create_temp_view(current_table, table_data)
 
         except Exception as e:
             self.logger.error(f"Failed to process sectioned file '{file_path}': {e}")
             raise RuntimeError(f"Error processing file '{file_path}': {e}")
 
-    def _create_temp_view(self, table_name, table_data):
+    def create_temp_view(self, table_name, table_data):
         """
         Converts a table section into a Spark DataFrame and creates a temporary view.
         """
@@ -78,7 +80,7 @@ class ETLTestCases(unittest.TestCase):
             self.logger.error(f"Failed to create temp view for '{table_name}': {e}")
             raise
 
-    def _validate_sql_syntax(self, query):
+    def validate_sql_syntax(self, query):
         """
         Validates SQL syntax by running the EXPLAIN command on the query.
         """
@@ -88,21 +90,37 @@ class ETLTestCases(unittest.TestCase):
         except Exception as e:
             return str(e)
 
-    def _mock_extract_data_lumi(self):
+    def test_extract_data_lumi(self):
         """
-        Simulates the "Extract" phase by executing extract queries on the temporary views.
+        Executes the "Extract" phase queries:
+        - Handles dynamic_variable_flag for parameterized queries.
+        - Validates that extracted views are created successfully.
         """
-        extract_queries = self.config.get("queries", {}).get("extract", [])
-        assert extract_queries, "No extract queries found in config"
+        extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
+        assert extract_queries, f"No queries found for key '{self.extract_key}' in config"
+
+        # Parameters from the config or run_test.py
+        dynamic_params = self.config.get("dynamic_params", {})  # Default empty dict
 
         for query_info in extract_queries:
             table_name = query_info["name"]
             query = query_info["query"]
+            dynamic_variable_flag = query_info.get("dynamic_variable_flag", False)
 
-            syntax_error = self._validate_sql_syntax(query)
+            # Handle dynamic parameter substitution if the flag is True
+            if dynamic_variable_flag:
+                try:
+                    query = query.format(**dynamic_params)
+                except KeyError as e:
+                    self.logger.error(f"Missing parameter {e} for dynamic query: {table_name}")
+                    raise ValueError(f"Missing parameter {e} for dynamic query: {table_name}")
+
+            # Validate SQL syntax
+            syntax_error = self.validate_sql_syntax(query)
             if syntax_error is not True:
                 raise RuntimeError(f"Syntax error in extract query '{table_name}': {syntax_error}")
 
+            # Execute the query and create the temp view
             try:
                 self.logger.info(f"Executing extract query for '{table_name}': {query}")
                 df = self.spark.sql(query)
@@ -112,41 +130,45 @@ class ETLTestCases(unittest.TestCase):
                 self.logger.error(f"Failed to execute extract query for '{table_name}': {e}")
                 raise
 
-    def test_etl_pipeline(self):
-        """
-        Executes the ETL pipeline:
-        - Loads sample data
-        - Runs extract queries
-        - Validates transformations
-        """
-        self._load_sample_data()
-        self._mock_extract_data_lumi()
-
-        queries = self.config.get("queries", {})
-        extract_queries = queries.get("extract", [])
-        transform_queries = queries.get("transform", [])
-
         # Validate extracted views
-        for query in extract_queries:
-            table_name = query["name"]
+        for query_info in extract_queries:
+            table_name = query_info["name"]
             self.assertTrue(
                 self.spark.catalog.tableExists(table_name),
                 f"Extracted view '{table_name}' was not created"
             )
 
-        # Validate and execute transformations
-        for query in transform_queries:
-            syntax_error = self._validate_sql_syntax(query["query"])
-            if syntax_error is not True:
-                raise RuntimeError(f"Syntax error in transform query '{query['name']}': {syntax_error}")
+    def test_etl_pipeline(self):
+        """
+        Executes the ETL pipeline:
+        - Loads sample data
+        - Runs extract queries based on `extract_key`
+        - Validates and runs transformation queries based on `transform_key`
+        """
+        self.load_sample_data()
+        self.test_extract_data_lumi()
 
+        queries = self.config.get("queries", {})
+        transform_queries = queries.get(self.transform_key, [])
+
+        # Validate transformation queries
+        for query_info in transform_queries:
+            table_name = query_info["name"]
+            query = query_info["query"]
+
+            syntax_error = self.validate_sql_syntax(query)
+            if syntax_error is not True:
+                raise RuntimeError(f"Syntax error in transform query '{table_name}': {syntax_error}")
+
+        # Execute transformation queries using the provided method
         execute_transform_queries(self.spark, transform_queries, self.logger)
 
         # Validate transformed views
-        for query in transform_queries:
+        for query_info in transform_queries:
+            table_name = query_info["name"]
             self.assertTrue(
-                self.spark.catalog.tableExists(query["name"]),
-                f"Transformed view '{query['name']}' was not created"
+                self.spark.catalog.tableExists(table_name),
+                f"Transformed view '{table_name}' was not created"
             )
 
     def test_load_simulation(self):
