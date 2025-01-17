@@ -91,84 +91,68 @@ class ETLTestCases(unittest.TestCase):
             return str(e)
 
 
-def extract_views(self, extract_queries, params):
+def execute_extraction(self, extract_queries, dynamic_params):
     """
-    Extracts data and creates temporary views for given queries.
-    Handles both dynamic_variable_flag being true or false.
+    Executes extraction queries and creates temp views.
     """
-    self.logger.info("Starting the extraction of views.")
+    self.logger.info("Starting extraction phase.")
+
     for query_info in extract_queries:
         table_name = query_info["name"]
         query = query_info["query"]
         dynamic_variable_flag = query_info.get("dynamic_variable_flag", False)
 
         try:
-            # Handle dynamic queries if the flag is true
             if dynamic_variable_flag:
-                self.logger.info(f"Processing dynamic query for '{table_name}' with params: {params}")
-                if not params:
-                    raise ValueError(f"Missing parameters for dynamic query: {table_name}")
-                formatted_query = query.format(**params)
+                self.logger.info(f"Executing dynamic query for '{table_name}': {query} with params: {dynamic_params}")
+                formatted_query = query.format(**dynamic_params)
             else:
+                self.logger.info(f"Executing static query for '{table_name}': {query}")
                 formatted_query = query
 
-            # Execute the query and create a temp view
-            self.logger.info(f"Executing query for '{table_name}': {formatted_query}")
+            # Execute query
             df = self.spark.sql(formatted_query)
-
-            # Debugging: Check schema and row count
             self.logger.info(f"Schema of temp view '{table_name}':")
             df.printSchema()
-            row_count = df.count()
-            self.logger.info(f"Row count for temp view '{table_name}': {row_count}")
-
-            if row_count == 0:
-                self.logger.warning(f"Temp view '{table_name}' is empty!")
-
+            self.logger.info(f"Row count for temp view '{table_name}': {df.count()}")
+            
+            # Create temp view
             df.createOrReplaceTempView(table_name)
             self.logger.info(f"Temp view '{table_name}' created successfully.")
-
-        except KeyError as e:
-            self.logger.error(f"Missing parameter {e} for query: {table_name}")
-            raise ValueError(f"Missing parameter {e} for query: {table_name}")
+        
         except Exception as e:
             self.logger.error(f"Failed to execute query for '{table_name}': {e}")
             raise
 
-    self.logger.info("Completed the extraction of views.")
+    self.logger.info("Completed extraction phase.")
 
 
 def rename_views(self, extract_queries):
     """
-    Renames the created temp views to validated_<table_name>.
+    Renames the extracted temp views to validated_<table_name>.
     """
-    self.logger.info("Starting the renaming of views to validated_<table_name>.")
+    self.logger.info("Starting renaming of views to validated_<table_name>.")
+
     for query_info in extract_queries:
         table_name = query_info["name"]
         validated_table_name = f"validated_{table_name}"
 
         try:
-            # Check if the view exists
+            # Check if the table exists
             if not self.spark.catalog.tableExists(table_name):
-                self.logger.error(f"Temp view '{table_name}' does not exist. Skipping rename.")
-                continue
-
-            # Check if the view contains data
-            df = self.spark.sql(f"SELECT * FROM {table_name}")
-            row_count = df.count()
-            if row_count == 0:
-                self.logger.warning(f"Temp view '{table_name}' is empty. Skipping rename.")
+                self.logger.warning(f"Temp view '{table_name}' does not exist. Skipping rename.")
                 continue
 
             # Rename the view
             self.spark.sql(f"CREATE OR REPLACE TEMP VIEW {validated_table_name} AS SELECT * FROM {table_name}")
             self.logger.info(f"Renamed temp view '{table_name}' to '{validated_table_name}'.")
-
+        
         except Exception as e:
             self.logger.error(f"Failed to rename view '{table_name}' to '{validated_table_name}': {e}")
             raise
 
-    self.logger.info("Completed renaming views.")
+    self.logger.info("Completed renaming of views.")
+
 
 
 
