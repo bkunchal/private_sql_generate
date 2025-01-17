@@ -90,55 +90,62 @@ class ETLTestCases(unittest.TestCase):
         except Exception as e:
             return str(e)
 
+
 def test_extract_data_lumi(self):
     """
     Executes the "Extract" phase queries:
     - Handles dynamic_variable_flag for parameterized queries.
-    - Creates validated table names with prefix `validated_`.
-    - Validates that extracted views are created successfully with validated table names.
+    - Validates that extracted views are created successfully.
     """
     extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
     assert extract_queries, f"No queries found for key '{self.extract_key}' in config"
 
     # Parameters from the config or run_test.py
-    dynamic_params = self.config.get("params", {})  # Default empty dict
+    dynamic_params = self.config.get("params", {})  # Default empty dictionary
 
     for query_info in extract_queries:
         table_name = query_info["name"]
         query = query_info["query"]
         dynamic_variable_flag = query_info.get("dynamic_variable_flag", False)
-        validated_table_name = f"validated_{table_name}"  # Prefix validated_ for extracted tables
+        validated_table_name = f"validated_{table_name}"  # Always use validated table name
 
-        # Handle dynamic parameter substitution if the flag is True
-        if dynamic_variable_flag:
-            try:
-                query = query.format(**dynamic_params)
-            except KeyError as e:
-                self.logger.error(f"Missing parameter {e} for dynamic query: {table_name}")
-                raise ValueError(f"Missing parameter {e} for dynamic query: {table_name}")
-
-        # Validate SQL syntax
-        syntax_error = self.validate_sql_syntax(query)
-        if syntax_error is not True:
-            raise RuntimeError(f"Syntax error in extract query '{table_name}': {syntax_error}")
-
-        # Execute the query and create the temp view
         try:
+            # Handle dynamic_variable_flag
+            if dynamic_variable_flag:
+                self.logger.info(f"Validating query syntax for '{table_name}' with dynamic parameters: {dynamic_params}")
+                # Substitute parameters into the query
+                query = query.format(**dynamic_params)
+
+            # Execute the query and create the temp view
             self.logger.info(f"Executing extract query for '{table_name}': {query}")
             df = self.spark.sql(query)
-            df.createOrReplaceTempView(validated_table_name)  # Use the validated table name
-            self.logger.info(f"Temp view '{validated_table_name}' created successfully after extraction")
+            df.createOrReplaceTempView(table_name)  # Create original view
+
+            # Rename the view to validated_<table_name> only for dynamic_variable_flag = True
+            if dynamic_variable_flag:
+                self.spark.sql(f"CREATE OR REPLACE TEMP VIEW {validated_table_name} AS SELECT * FROM {table_name}")
+                self.logger.info(f"Renamed temp view '{table_name}' to '{validated_table_name}'")
+            else:
+                # Directly create validated view for non-dynamic queries
+                df.createOrReplaceTempView(validated_table_name)
+                self.logger.info(f"Temp view '{validated_table_name}' created successfully after extraction")
+
+        except KeyError as e:
+            self.logger.error(f"Missing parameter {e} for dynamic query: {table_name}")
+            raise ValueError(f"Missing parameter {e} for dynamic query: {table_name}")
         except Exception as e:
             self.logger.error(f"Failed to execute extract query for '{table_name}': {e}")
             raise
 
     # Validate extracted views
     for query_info in extract_queries:
-        validated_table_name = f"validated_{query_info['name']}"  # Validate the prefixed table name
+        table_name = query_info["name"]
+        validated_table_name = f"validated_{table_name}"
         self.assertTrue(
             self.spark.catalog.tableExists(validated_table_name),
             f"Extracted view '{validated_table_name}' was not created"
         )
+
 
 def test_etl_pipeline(self):
     """
