@@ -97,11 +97,13 @@ def test_extract_data_lumi(self):
     - Handles dynamic_variable_flag for parameterized queries.
     - Validates that extracted views are created successfully.
     """
+    self.logger.info("Starting the extract module.")
     extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
     assert extract_queries, f"No queries found for key '{self.extract_key}' in config"
 
     # Parameters from the config or run_test.py
     dynamic_params = self.config.get("params", {})  # Default empty dictionary
+    self.logger.debug(f"Dynamic parameters: {dynamic_params}")
 
     for query_info in extract_queries:
         table_name = query_info["name"]
@@ -114,36 +116,31 @@ def test_extract_data_lumi(self):
             if dynamic_variable_flag:
                 self.logger.info(f"Validating query syntax for '{table_name}' with dynamic parameters: {dynamic_params}")
                 # Substitute parameters into the query
-                query = query.format(**dynamic_params)
-
-            # Execute the query and create the temp view
-            self.logger.info(f"Executing extract query for '{table_name}': {query}")
-            df = self.spark.sql(query)
-            df.createOrReplaceTempView(table_name)  # Create original view
-
-            # Rename the view to validated_<table_name> only for dynamic_variable_flag = True
-            if dynamic_variable_flag:
-                self.spark.sql(f"CREATE OR REPLACE TEMP VIEW {validated_table_name} AS SELECT * FROM {table_name}")
-                self.logger.info(f"Renamed temp view '{table_name}' to '{validated_table_name}'")
+                try:
+                    formatted_query = query.format(**dynamic_params)
+                except KeyError as e:
+                    self.logger.error(f"Missing parameter {e} for dynamic query: {table_name}")
+                    raise ValueError(f"Missing parameter {e} for dynamic query: {table_name}")
             else:
-                # Directly create validated view for non-dynamic queries
-                df.createOrReplaceTempView(validated_table_name)
-                self.logger.info(f"Temp view '{validated_table_name}' created successfully after extraction")
+                formatted_query = query  # Use the query as-is when dynamic_variable_flag is False
 
-        except KeyError as e:
-            self.logger.error(f"Missing parameter {e} for dynamic query: {table_name}")
-            raise ValueError(f"Missing parameter {e} for dynamic query: {table_name}")
+            # Execute the query and create the original view
+            self.logger.info(f"Executing extract query for '{table_name}': {formatted_query}")
+            df = self.spark.sql(formatted_query)
+            df.createOrReplaceTempView(validated_table_name)  # Use the validated table name
+            self.logger.info(f"Temp view '{validated_table_name}' created successfully after extraction")
+
         except Exception as e:
             self.logger.error(f"Failed to execute extract query for '{table_name}': {e}")
             raise
 
-    # Validate extracted views
+    # Validate all extracted views
     for query_info in extract_queries:
         table_name = query_info["name"]
-        validated_table_name = f"validated_{table_name}"
+        validated_table_name = f"validated_{table_name}"  # Ensure validation against renamed table
         self.assertTrue(
             self.spark.catalog.tableExists(validated_table_name),
-            f"Extracted view '{validated_table_name}' was not created"
+            f"Validated view '{validated_table_name}' was not created"
         )
 
 
