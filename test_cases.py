@@ -1,6 +1,6 @@
 import unittest
 from pyspark.sql import DataFrame
-from src.transform_data import execute_transform_queries
+from src.transform_data import transform_queries
 
 
 class ETLTestCases(unittest.TestCase):
@@ -90,86 +90,85 @@ class ETLTestCases(unittest.TestCase):
         except Exception as e:
             return str(e)
 
-    def test_extract_data_lumi(self):
-        """
-        Executes the "Extract" phase queries:
-        - Handles dynamic_variable_flag for parameterized queries.
-        - Validates that extracted views are created successfully.
-        """
-        extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
-        assert extract_queries, f"No queries found for key '{self.extract_key}' in config"
+def test_extract_data_lumi(self):
+    """
+    Executes the "Extract" phase queries:
+    - Handles dynamic_variable_flag for parameterized queries.
+    - Creates validated table names with prefix `validated_`.
+    - Validates that extracted views are created successfully with validated table names.
+    """
+    extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
+    assert extract_queries, f"No queries found for key '{self.extract_key}' in config"
 
-        # Parameters from the config or run_test.py
-        dynamic_params = self.config.get("dynamic_params", {})  # Default empty dict
+    # Parameters from the config or run_test.py
+    dynamic_params = self.config.get("params", {})  # Default empty dict
 
-        for query_info in extract_queries:
-            table_name = query_info["name"]
-            query = query_info["query"]
-            dynamic_variable_flag = query_info.get("dynamic_variable_flag", False)
+    for query_info in extract_queries:
+        table_name = query_info["name"]
+        query = query_info["query"]
+        dynamic_variable_flag = query_info.get("dynamic_variable_flag", False)
+        validated_table_name = f"validated_{table_name}"  # Prefix validated_ for extracted tables
 
-            # Handle dynamic parameter substitution if the flag is True
-            if dynamic_variable_flag:
-                try:
-                    query = query.format(**dynamic_params)
-                except KeyError as e:
-                    self.logger.error(f"Missing parameter {e} for dynamic query: {table_name}")
-                    raise ValueError(f"Missing parameter {e} for dynamic query: {table_name}")
-
-            # Validate SQL syntax
-            syntax_error = self.validate_sql_syntax(query)
-            if syntax_error is not True:
-                raise RuntimeError(f"Syntax error in extract query '{table_name}': {syntax_error}")
-
-            # Execute the query and create the temp view
+        # Handle dynamic parameter substitution if the flag is True
+        if dynamic_variable_flag:
             try:
-                self.logger.info(f"Executing extract query for '{table_name}': {query}")
-                df = self.spark.sql(query)
-                df.createOrReplaceTempView(table_name)
-                self.logger.info(f"Temp view '{table_name}' created successfully after extraction")
-            except Exception as e:
-                self.logger.error(f"Failed to execute extract query for '{table_name}': {e}")
-                raise
+                query = query.format(**dynamic_params)
+            except KeyError as e:
+                self.logger.error(f"Missing parameter {e} for dynamic query: {table_name}")
+                raise ValueError(f"Missing parameter {e} for dynamic query: {table_name}")
 
-        # Validate extracted views
-        for query_info in extract_queries:
-            table_name = query_info["name"]
-            self.assertTrue(
-                self.spark.catalog.tableExists(table_name),
-                f"Extracted view '{table_name}' was not created"
-            )
+        # Validate SQL syntax
+        syntax_error = self.validate_sql_syntax(query)
+        if syntax_error is not True:
+            raise RuntimeError(f"Syntax error in extract query '{table_name}': {syntax_error}")
 
-    def test_etl_pipeline(self):
-        """
-        Executes the ETL pipeline:
-        - Loads sample data
-        - Runs extract queries based on `extract_key`
-        - Validates and runs transformation queries based on `transform_key`
-        """
-        self.load_sample_data()
-        self.test_extract_data_lumi()
+        # Execute the query and create the temp view
+        try:
+            self.logger.info(f"Executing extract query for '{table_name}': {query}")
+            df = self.spark.sql(query)
+            df.createOrReplaceTempView(validated_table_name)  # Use the validated table name
+            self.logger.info(f"Temp view '{validated_table_name}' created successfully after extraction")
+        except Exception as e:
+            self.logger.error(f"Failed to execute extract query for '{table_name}': {e}")
+            raise
 
-        queries = self.config.get("queries", {})
-        transform_queries = queries.get(self.transform_key, [])
+    # Validate extracted views
+    for query_info in extract_queries:
+        validated_table_name = f"validated_{query_info['name']}"  # Validate the prefixed table name
+        self.assertTrue(
+            self.spark.catalog.tableExists(validated_table_name),
+            f"Extracted view '{validated_table_name}' was not created"
+        )
 
-        # Validate transformation queries
-        for query_info in transform_queries:
-            table_name = query_info["name"]
-            query = query_info["query"]
+def test_etl_pipeline(self):
+    """
+    Executes the ETL pipeline:
+    - Loads sample data
+    - Executes extraction queries
+    - Executes transformation queries using the imported function
+    """
+    self.load_sample_data()
+    self.test_extract_data_lumi()
 
-            syntax_error = self.validate_sql_syntax(query)
-            if syntax_error is not True:
-                raise RuntimeError(f"Syntax error in transform query '{table_name}': {syntax_error}")
+    # Fetch the transformation queries from the configuration
+    transform_queries_config = self.config.get("queries", {}).get(self.transform_key, [])
+    assert transform_queries_config, f"No queries found for key '{self.transform_key}' in config"
 
-        # Execute transformation queries using the provided method
-        execute_transform_queries(self.spark, transform_queries, self.logger)
+    # Use the `transform_queries` function from the imported module
+    try:
+        transform_queries(self.spark, self.logger, transform_queries_config, params=self.config.get("params"))
+    except Exception as e:
+        self.logger.error(f"Failed to execute transformation queries: {str(e)}")
+        raise
 
-        # Validate transformed views
-        for query_info in transform_queries:
-            table_name = query_info["name"]
-            self.assertTrue(
-                self.spark.catalog.tableExists(table_name),
-                f"Transformed view '{table_name}' was not created"
-            )
+    # Validate transformed views
+    for query_info in transform_queries_config:
+        table_name = query_info["name"]
+        self.assertTrue(
+            self.spark.catalog.tableExists(table_name),
+            f"Transformed view '{table_name}' was not created"
+        )
+
 
     def test_load_simulation(self):
         """
