@@ -115,12 +115,18 @@ def extract_views(self, extract_queries, params):
             # Execute the query and create a temp view
             self.logger.info(f"Executing query for '{table_name}': {formatted_query}")
             df = self.spark.sql(formatted_query)
+
+            # Debugging: Check schema and row count
+            self.logger.info(f"Schema of temp view '{table_name}':")
+            df.printSchema()
+            row_count = df.count()
+            self.logger.info(f"Row count for temp view '{table_name}': {row_count}")
+
+            if row_count == 0:
+                self.logger.warning(f"Temp view '{table_name}' is empty!")
+
             df.createOrReplaceTempView(table_name)
             self.logger.info(f"Temp view '{table_name}' created successfully.")
-
-            # Debugging: Show data
-            self.logger.info(f"Data for temp view '{table_name}':")
-            df.show()
 
         except KeyError as e:
             self.logger.error(f"Missing parameter {e} for query: {table_name}")
@@ -130,6 +136,7 @@ def extract_views(self, extract_queries, params):
             raise
 
     self.logger.info("Completed the extraction of views.")
+
 
 def rename_views(self, extract_queries):
     """
@@ -143,7 +150,15 @@ def rename_views(self, extract_queries):
         try:
             # Check if the view exists
             if not self.spark.catalog.tableExists(table_name):
-                raise ValueError(f"Temp view '{table_name}' does not exist, cannot rename to '{validated_table_name}'.")
+                self.logger.error(f"Temp view '{table_name}' does not exist. Skipping rename.")
+                continue
+
+            # Check if the view contains data
+            df = self.spark.sql(f"SELECT * FROM {table_name}")
+            row_count = df.count()
+            if row_count == 0:
+                self.logger.warning(f"Temp view '{table_name}' is empty. Skipping rename.")
+                continue
 
             # Rename the view
             self.spark.sql(f"CREATE OR REPLACE TEMP VIEW {validated_table_name} AS SELECT * FROM {table_name}")
@@ -154,6 +169,7 @@ def rename_views(self, extract_queries):
             raise
 
     self.logger.info("Completed renaming views.")
+
 
 
 def test_extract_data_lumi(self):
