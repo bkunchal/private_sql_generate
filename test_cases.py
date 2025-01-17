@@ -91,92 +91,74 @@ class ETLTestCases(unittest.TestCase):
             return str(e)
 
 
-def execute_extraction(self, extract_queries, dynamic_params):
+def rename_to_validated_views(self):
     """
-    Executes extraction queries and creates temp views.
+    Renames extracted views to validated_<table_name>.
     """
-    self.logger.info("Starting extraction phase.")
+    self.logger.info("Starting renaming phase.")
+    extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
+    for query_info in extract_queries:
+        table_name = query_info["name"]
+        validated_table_name = f"validated_{table_name}"
+        try:
+            if self.spark.catalog.tableExists(table_name):
+                self.spark.sql(f"CREATE OR REPLACE TEMP VIEW {validated_table_name} AS SELECT * FROM {table_name}")
+                self.logger.info(f"Renamed temp view '{table_name}' to '{validated_table_name}'.")
+            else:
+                self.logger.warning(f"Temp view '{table_name}' is empty or does not exist. Skipping rename.")
+        except Exception as e:
+            self.logger.error(f"Failed to rename temp view '{table_name}' to '{validated_table_name}': {e}")
+            raise
+    self.logger.info("Completed renaming of views.")
+
+
+
+def test_extract_data_lumi(self):
+    """
+    Executes the "Extract" phase queries
+    """
+    # Fetch extract queries from the configuration
+    extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
+    assert extract_queries, f"No queries found for key '{self.extract_key}' in config"
+
+    # Fetch dynamic parameters if available
+    dynamic_params = self.config.get("dynamic_params", {})
 
     for query_info in extract_queries:
         table_name = query_info["name"]
         query = query_info["query"]
         dynamic_variable_flag = query_info.get("dynamic_variable_flag", False)
 
-        try:
-            if dynamic_variable_flag:
-                self.logger.info(f"Executing dynamic query for '{table_name}': {query} with params: {dynamic_params}")
-                formatted_query = query.format(**dynamic_params)
-            else:
-                self.logger.info(f"Executing static query for '{table_name}': {query}")
-                formatted_query = query
+        # Handle dynamic parameter substitution if the flag is True
+        if dynamic_variable_flag:
+            try:
+                query = query.format(**dynamic_params)
+            except KeyError as e:
+                self.logger.error(f"Missing parameter {e} for dynamic query: {table_name}")
+                raise ValueError(f"Missing parameter {e} for dynamic query: {table_name}")
 
-            # Execute query
-            df = self.spark.sql(formatted_query)
-            self.logger.info(f"Schema of temp view '{table_name}':")
-            df.printSchema()
-            self.logger.info(f"Row count for temp view '{table_name}': {df.count()}")
-            
-            # Create temp view
+        # Validate SQL syntax
+        syntax_error = self.validate_sql_syntax(query)
+        if syntax_error is not True:
+            raise RuntimeError(f"Syntax error in extract query for '{table_name}': {syntax_error}")
+
+        # Execute the query and create the temp view
+        try:
+            df = self.spark.sql(query)
             df.createOrReplaceTempView(table_name)
-            self.logger.info(f"Temp view '{table_name}' created successfully.")
-        
+            self.logger.info(f"Temp view '{table_name}' created successfully after extraction")
         except Exception as e:
-            self.logger.error(f"Failed to execute query for '{table_name}': {e}")
+            self.logger.error(f"Failed to execute extract query for '{table_name}': {e}")
             raise
 
-    self.logger.info("Completed extraction phase.")
-
-
-def rename_views(self, extract_queries):
-    """
-    Renames the extracted temp views to validated_<table_name>.
-    """
-    self.logger.info("Starting renaming of views to validated_<table_name>.")
-
+    # Validate extracted views
     for query_info in extract_queries:
         table_name = query_info["name"]
-        validated_table_name = f"validated_{table_name}"
+        self.assertTrue(
+            self.spark.catalog.tableExists(table_name),
+            f"Extracted view '{table_name}' was not created"
+        )
 
-        try:
-            # Check if the table exists
-            if not self.spark.catalog.tableExists(table_name):
-                self.logger.warning(f"Temp view '{table_name}' does not exist. Skipping rename.")
-                continue
-
-            # Rename the view
-            self.spark.sql(f"CREATE OR REPLACE TEMP VIEW {validated_table_name} AS SELECT * FROM {table_name}")
-            self.logger.info(f"Renamed temp view '{table_name}' to '{validated_table_name}'.")
-        
-        except Exception as e:
-            self.logger.error(f"Failed to rename view '{table_name}' to '{validated_table_name}': {e}")
-            raise
-
-    self.logger.info("Completed renaming of views.")
-
-
-
-
-def test_extract_data_lumi(self):
-    """
-    Executes the extraction and renaming process.
-    """
-    self.logger.info("Starting the extract and rename module.")
-
-    # Get extract queries from config
-    extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
-    assert extract_queries, f"No queries found for key '{self.extract_key}' in config"
-
-    # Parameters from the config or run_test.py
-    dynamic_params = self.config.get("params", {})  # Default empty dictionary
-    self.logger.debug(f"Dynamic parameters: {dynamic_params}")
-
-    # Step 1: Extract Views
-    self.extract_views(extract_queries, dynamic_params)
-
-    # Step 2: Rename Views
-    self.rename_views(extract_queries)
-
-    self.logger.info("Completed the extract and rename module.")
 
 
 
@@ -190,6 +172,8 @@ def test_etl_pipeline(self):
     """
     self.load_sample_data()
     self.test_extract_data_lumi()
+    self.rename_to_validated_views()
+
 
     # Fetch the transformation queries from the configuration
     transform_queries_config = self.config.get("queries", {}).get(self.transform_key, [])
