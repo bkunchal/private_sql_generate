@@ -91,13 +91,78 @@ class ETLTestCases(unittest.TestCase):
             return str(e)
 
 
+def extract_views(self, extract_queries, params):
+    """
+    Extracts data and creates temporary views for given queries.
+    Handles both dynamic_variable_flag being true or false.
+    """
+    self.logger.info("Starting the extraction of views.")
+    for query_info in extract_queries:
+        table_name = query_info["name"]
+        query = query_info["query"]
+        dynamic_variable_flag = query_info.get("dynamic_variable_flag", False)
+
+        try:
+            # Handle dynamic queries if the flag is true
+            if dynamic_variable_flag:
+                self.logger.info(f"Processing dynamic query for '{table_name}' with params: {params}")
+                if not params:
+                    raise ValueError(f"Missing parameters for dynamic query: {table_name}")
+                formatted_query = query.format(**params)
+            else:
+                formatted_query = query
+
+            # Execute the query and create a temp view
+            self.logger.info(f"Executing query for '{table_name}': {formatted_query}")
+            df = self.spark.sql(formatted_query)
+            df.createOrReplaceTempView(table_name)
+            self.logger.info(f"Temp view '{table_name}' created successfully.")
+
+            # Debugging: Show data
+            self.logger.info(f"Data for temp view '{table_name}':")
+            df.show()
+
+        except KeyError as e:
+            self.logger.error(f"Missing parameter {e} for query: {table_name}")
+            raise ValueError(f"Missing parameter {e} for query: {table_name}")
+        except Exception as e:
+            self.logger.error(f"Failed to execute query for '{table_name}': {e}")
+            raise
+
+    self.logger.info("Completed the extraction of views.")
+
+def rename_views(self, extract_queries):
+    """
+    Renames the created temp views to validated_<table_name>.
+    """
+    self.logger.info("Starting the renaming of views to validated_<table_name>.")
+    for query_info in extract_queries:
+        table_name = query_info["name"]
+        validated_table_name = f"validated_{table_name}"
+
+        try:
+            # Check if the view exists
+            if not self.spark.catalog.tableExists(table_name):
+                raise ValueError(f"Temp view '{table_name}' does not exist, cannot rename to '{validated_table_name}'.")
+
+            # Rename the view
+            self.spark.sql(f"CREATE OR REPLACE TEMP VIEW {validated_table_name} AS SELECT * FROM {table_name}")
+            self.logger.info(f"Renamed temp view '{table_name}' to '{validated_table_name}'.")
+
+        except Exception as e:
+            self.logger.error(f"Failed to rename view '{table_name}' to '{validated_table_name}': {e}")
+            raise
+
+    self.logger.info("Completed renaming views.")
+
+
 def test_extract_data_lumi(self):
     """
-    Executes the "Extract" phase queries:
-    - Handles dynamic_variable_flag for parameterized queries.
-    - Validates that extracted views are created successfully.
+    Executes the extraction and renaming process.
     """
-    self.logger.info("Starting the extract module.")
+    self.logger.info("Starting the extract and rename module.")
+
+    # Get extract queries from config
     extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
     assert extract_queries, f"No queries found for key '{self.extract_key}' in config"
 
@@ -105,43 +170,15 @@ def test_extract_data_lumi(self):
     dynamic_params = self.config.get("params", {})  # Default empty dictionary
     self.logger.debug(f"Dynamic parameters: {dynamic_params}")
 
-    for query_info in extract_queries:
-        table_name = query_info["name"]
-        query = query_info["query"]
-        dynamic_variable_flag = query_info.get("dynamic_variable_flag", False)
-        validated_table_name = f"validated_{table_name}"  # Always use validated table name
+    # Step 1: Extract Views
+    self.extract_views(extract_queries, dynamic_params)
 
-        try:
-            # Handle dynamic_variable_flag
-            if dynamic_variable_flag:
-                self.logger.info(f"Validating query syntax for '{table_name}' with dynamic parameters: {dynamic_params}")
-                # Substitute parameters into the query
-                try:
-                    formatted_query = query.format(**dynamic_params)
-                except KeyError as e:
-                    self.logger.error(f"Missing parameter {e} for dynamic query: {table_name}")
-                    raise ValueError(f"Missing parameter {e} for dynamic query: {table_name}")
-            else:
-                formatted_query = query  # Use the query as-is when dynamic_variable_flag is False
+    # Step 2: Rename Views
+    self.rename_views(extract_queries)
 
-            # Execute the query and create the original view
-            self.logger.info(f"Executing extract query for '{table_name}': {formatted_query}")
-            df = self.spark.sql(formatted_query)
-            df.createOrReplaceTempView(validated_table_name)  # Use the validated table name
-            self.logger.info(f"Temp view '{validated_table_name}' created successfully after extraction")
+    self.logger.info("Completed the extract and rename module.")
 
-        except Exception as e:
-            self.logger.error(f"Failed to execute extract query for '{table_name}': {e}")
-            raise
 
-    # Validate all extracted views
-    for query_info in extract_queries:
-        table_name = query_info["name"]
-        validated_table_name = f"validated_{table_name}"  # Ensure validation against renamed table
-        self.assertTrue(
-            self.spark.catalog.tableExists(validated_table_name),
-            f"Validated view '{validated_table_name}' was not created"
-        )
 
 
 def test_etl_pipeline(self):
