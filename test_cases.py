@@ -91,31 +91,9 @@ class ETLTestCases(unittest.TestCase):
             return str(e)
 
 
-def rename_to_validated_views(self):
-    """
-    Renames extracted views to validated_<table_name>.
-    """
-    self.logger.info("Starting renaming phase.")
-    extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
-    for query_info in extract_queries:
-        table_name = query_info["name"]
-        validated_table_name = f"validated_{table_name}"
-        try:
-            if self.spark.catalog.tableExists(table_name):
-                self.spark.sql(f"CREATE OR REPLACE TEMP VIEW {validated_table_name} AS SELECT * FROM {table_name}")
-                self.logger.info(f"Renamed temp view '{table_name}' to '{validated_table_name}'.")
-            else:
-                self.logger.warning(f"Temp view '{table_name}' is empty or does not exist. Skipping rename.")
-        except Exception as e:
-            self.logger.error(f"Failed to rename temp view '{table_name}' to '{validated_table_name}': {e}")
-            raise
-    self.logger.info("Completed renaming of views.")
-
-
-
 def test_extract_data_lumi(self):
     """
-    Executes the "Extract" phase queries
+    Executes the "Extract" phase queries and renames the resulting views to validated_<table_name>.
     """
     # Fetch extract queries from the configuration
     extract_queries = self.config.get("queries", {}).get(self.extract_key, [])
@@ -128,6 +106,7 @@ def test_extract_data_lumi(self):
         table_name = query_info["name"]
         query = query_info["query"]
         dynamic_variable_flag = query_info.get("dynamic_variable_flag", False)
+        validated_table_name = f"validated_{table_name}"
 
         # Handle dynamic parameter substitution if the flag is True
         if dynamic_variable_flag:
@@ -145,20 +124,20 @@ def test_extract_data_lumi(self):
         # Execute the query and create the temp view
         try:
             df = self.spark.sql(query)
-            df.createOrReplaceTempView(table_name)
-            self.logger.info(f"Temp view '{table_name}' created successfully after extraction")
+            df.createOrReplaceTempView(validated_table_name)  # Directly create the validated view
+            self.logger.info(f"Temp view '{validated_table_name}' created successfully after extraction")
+            df.show()  # Log the data for debugging
         except Exception as e:
             self.logger.error(f"Failed to execute extract query for '{table_name}': {e}")
             raise
 
     # Validate extracted views
     for query_info in extract_queries:
-        table_name = query_info["name"]
+        validated_table_name = f"validated_{query_info['name']}"
         self.assertTrue(
-            self.spark.catalog.tableExists(table_name),
-            f"Extracted view '{table_name}' was not created"
+            self.spark.catalog.tableExists(validated_table_name),
+            f"Validated view '{validated_table_name}' was not created"
         )
-
 
 
 
@@ -172,7 +151,6 @@ def test_etl_pipeline(self):
     """
     self.load_sample_data()
     self.test_extract_data_lumi()
-    self.rename_to_validated_views()
 
 
     # Fetch the transformation queries from the configuration
