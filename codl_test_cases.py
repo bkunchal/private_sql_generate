@@ -1,12 +1,12 @@
 import unittest
-
+import os
 
 class ETLTestCases(unittest.TestCase):
     spark = None
-    file_path = None  # Input sectioned file path
+    file_paths = None  # Dictionary of input files
     logger = None
-    module_to_test = None  # Dynamically loaded PySpark module
-    sql_variables = {}  # Dictionary mapping SQL variable names to expected view names
+    module_to_test = None  # PySpark module to test
+    sql_variables = {}  # Mapping SQL variable names to expected view names
 
     @classmethod
     def setUpClass(cls):
@@ -14,49 +14,63 @@ class ETLTestCases(unittest.TestCase):
         Set up Spark session, logger, and load input data.
         """
         assert cls.spark, "Spark session must be initialized before running tests."
-        assert cls.file_path, "Input file path must be provided for tests."
+        assert cls.file_paths, "Input file paths must be provided."
         assert cls.logger, "Logger must be initialized for debugging."
         assert cls.module_to_test, "PySpark module to test must be provided."
 
+        # Validate file paths
+        cls.validate_file_paths()
+
         # Load sectioned CSV data into Spark temporary views
-        cls.load_sectioned_data()
+        cls.load_data()
 
     @classmethod
-    def load_sectioned_data(cls):
+    def validate_file_paths(cls):
         """
-        Reads a single sectioned CSV file and loads data into Spark temp views.
+        Validates that all provided file paths exist.
         """
-        try:
-            with open(cls.file_path, "r") as file:
-                lines = file.readlines()
+        for file_name, file_path in cls.file_paths.items():
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"Data file '{file_path}' not found.")
+        cls.logger.info("All input files validated successfully.")
 
-            current_table = None
-            table_data = []
+    @classmethod
+    def load_data(cls):
+        """
+        Reads multiple sectioned CSV files and loads data into Spark temp views.
+        """
+        for file_name, file_path in cls.file_paths.items():
+            try:
+                with open(file_path, "r") as file:
+                    lines = file.readlines()
 
-            for line in lines:
-                line = line.strip()
-                if line.startswith("[") and line.endswith("]"):
-                    # Process the current table's data
-                    if current_table and table_data:
-                        cls.create_temp_view(current_table, table_data)
-                        table_data = []
+                current_table = None
+                table_data = []
 
-                    current_table = line.strip("[]")  # Extract table name
-                elif current_table and line:
-                    table_data.append(line)
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("[") and line.endswith("]"):
+                        # Process the previous table's data
+                        if current_table and table_data:
+                            cls.create_temp_view(current_table, table_data)
+                            table_data = []
 
-            # Process the last table's data
-            if current_table and table_data:
-                cls.create_temp_view(current_table, table_data)
+                        current_table = line.strip("[]")  # Extract the table name
+                    elif current_table and line:
+                        table_data.append(line)
 
-        except Exception as e:
-            cls.logger.error(f"Error processing sectioned file '{cls.file_path}': {e}")
-            raise RuntimeError(f"Failed to process file '{cls.file_path}': {e}")
+                # Process the last table's data
+                if current_table and table_data:
+                    cls.create_temp_view(current_table, table_data)
+
+            except Exception as e:
+                cls.logger.error(f"Failed to process sectioned file '{file_path}': {e}")
+                raise RuntimeError(f"Error processing file '{file_path}': {e}")
 
     @classmethod
     def create_temp_view(cls, table_name, table_data):
         """
-        Create a temporary view for a table section.
+        Converts a table section into a Spark DataFrame and creates a temporary view.
         """
         try:
             headers = table_data[0].split(",")  # First row as headers
@@ -67,8 +81,8 @@ class ETLTestCases(unittest.TestCase):
             cls.logger.info(f"Temp view '{table_name}' created successfully.")
             df.show()  # Debugging purposes
         except Exception as e:
-            cls.logger.error(f"Failed to create temp view '{table_name}': {e}")
-            raise RuntimeError(f"Error creating temp view '{table_name}': {e}")
+            cls.logger.error(f"Failed to create temp view for '{table_name}': {e}")
+            raise
 
     def test_sql_execution(self):
         """

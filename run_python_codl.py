@@ -1,17 +1,15 @@
 import unittest
-from pyspark.sql import SparkSession
-from test_cases import ETLTestCases
 import logging
-import os
-import pyspark_file  # Replace with the name of your provided PySpark file
+from pyspark.sql import SparkSession
+from tests.test_cases import ETLTestCases
+import src.main.tablename.sample_config as sample_config  # Import the PySpark file
 
 if __name__ == "__main__":
-    # File path for the sample sectioned data
-    file_path = "test/test-data/sampledata.csv"  # Path to your input data file
-
-    # Validate the existence of the file
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Data file not found: {file_path}")
+    # Define multiple input data files (each containing multiple table sections)
+    file_paths = {
+        "file1": "test-data/file1.csv",
+        "file2": "test-data/file2.csv",
+    }
 
     # Initialize Spark session
     spark = SparkSession.builder \
@@ -27,11 +25,11 @@ if __name__ == "__main__":
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    # Configure the ETL test case class
+    # Configure the test case with Spark, logger, and input data files
     ETLTestCases.spark = spark
     ETLTestCases.logger = logger
-    ETLTestCases.file_path = file_path  # Input file path
-    ETLTestCases.module_to_test = pyspark_file  # Reference to the provided PySpark script
+    ETLTestCases.file_paths = file_paths  # Only passing file paths
+    ETLTestCases.module_to_test = sample_config  # Reference to the PySpark script
     ETLTestCases.sql_variables = {
         "sus_retail_temp_Query": "sus_retail_temp",
         "sus_retail_final_Query": "sus_retail_final"
@@ -40,9 +38,9 @@ if __name__ == "__main__":
     # Run the tests
     result = unittest.TextTestRunner().run(unittest.TestLoader().loadTestsFromTestCase(ETLTestCases))
 
-    # Stop the Spark session
+    # Stop Spark session
     spark.stop()
 
-    # Exit with the appropriate status
+    # Exit with failure code if tests fail
     if not result.wasSuccessful():
         exit(1)
