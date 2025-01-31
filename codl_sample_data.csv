@@ -1,0 +1,33 @@
+[customers]
+customer_id,customer_name,region
+1,John Doe,North
+2,Jane Smith,South
+3,Michael Brown,North
+4,Emily Johnson,West
+5,Chris Davis,East
+
+[orders]
+order_id,customer_id,order_date,order_amount
+101,1,2024-01-10,500
+102,2,2024-02-15,750
+103,3,2024-03-12,600
+104,4,2024-04-05,400
+105,5,2024-05-18,900
+
+[order_items]
+order_id,product_id,quantity
+101,201,2
+101,202,1
+102,203,5
+103,204,3
+104,205,2
+105,206,4
+
+[products]
+product_id,product_name,category,price
+201,Laptop,Electronics,1200
+202,Smartphone,Electronics,800
+203,Tablet,Electronics,500
+204,Headphones,Accessories,200
+205,Smartwatch,Accessories,300
+206,Monitor,Electronics,700

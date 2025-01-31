@@ -1,15 +1,16 @@
 import unittest
 import logging
+import os
 from pyspark.sql import SparkSession
-from tests.test_cases import ETLTestCases
-import src.main.tablename.sample_config as sample_config  # Import the PySpark file
+from tests.test_cases import ETLTestCases  # Import the test case class
+import src.main.tablename.sample_config as sample_config  # Import the PySpark file to test
 
 if __name__ == "__main__":
     # Define multiple input data files (each containing multiple table sections)
     file_paths = {
-        "file1": "test-data/file1.csv",
-        "file2": "test-data/file2.csv",
+        "sample_data": "test-data/sample_data.csv"  # Ensure this file exists
     }
+
 
     # Initialize Spark session
     spark = SparkSession.builder \
@@ -25,14 +26,15 @@ if __name__ == "__main__":
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    # Configure the test case with Spark, logger, and input data files
+    # Inject Spark session, logger, input data, and PySpark module into test cases
     ETLTestCases.spark = spark
     ETLTestCases.logger = logger
-    ETLTestCases.file_paths = file_paths  # Only passing file paths
+    ETLTestCases.file_paths = file_paths  # Pass sectioned CSV file paths
     ETLTestCases.module_to_test = sample_config  # Reference to the PySpark script
     ETLTestCases.sql_variables = {
-        "sus_retail_temp_Query": "sus_retail_temp",
-        "sus_retail_final_Query": "sus_retail_final"
+        "customer_orders_query": "customer_orders_summary",
+        "regional_sales_query": "regional_sales_summary",
+        "product_sales_query": "product_sales_summary"
     }
 
     # Run the tests
