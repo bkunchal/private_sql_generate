@@ -11,7 +11,7 @@ class ETLTestCases(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """
-        Set up Spark session, logger, and load input data.
+        Set up Spark session, logger, load input data, and create temp views before running tests.
         """
         assert cls.spark, "Spark session must be initialized before running tests."
         assert cls.file_paths, "Input file paths must be provided."
@@ -23,6 +23,9 @@ class ETLTestCases(unittest.TestCase):
 
         # Load sectioned CSV data into Spark temporary views
         cls.load_data()
+
+        # Pre-execute SQL queries to create temp views before tests
+        cls.preload_temp_views()
 
     @classmethod
     def validate_file_paths(cls):
@@ -83,6 +86,24 @@ class ETLTestCases(unittest.TestCase):
         except Exception as e:
             cls.logger.error(f"Failed to create temp view for '{table_name}': {e}")
             raise
+
+    @classmethod
+    def preload_temp_views(cls):
+        """
+        Execute all SQL queries in the module and create temp views before running tests.
+        This ensures that views are accessible when test cases run.
+        """
+        for sql_var, view_name in cls.sql_variables.items():
+            query = getattr(cls.module_to_test, sql_var, None)
+            assert query, f"SQL variable '{sql_var}' not found in the PySpark module."
+
+            try:
+                cls.logger.info(f"Preloading SQL query '{sql_var}': {query}")
+                df = cls.spark.sql(query)
+                df.createOrReplaceTempView(view_name)  # Creating temp views before tests run
+                cls.logger.info(f"Preloaded view '{view_name}' successfully.")
+            except Exception as e:
+                raise RuntimeError(f"Failed to preload SQL view '{view_name}': {e}")
 
     def test_sql_execution(self):
         """
