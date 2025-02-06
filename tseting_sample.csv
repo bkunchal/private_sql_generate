@@ -1,0 +1,19 @@
+[retail_emission_maxdate_final]
+dummy_key,gcp_billed_trans_load_dt
+1,2025-01-01 00:00:00 UTC
+1,2025-01-02 00:00:00 UTC
+
+[gcp_billed_trans_main]
+gcp_entitlement,clnt_orgn_id,bus_proc_dt,btch_no,trans_seq_no,base_acct_id,basic_supp_no,se_acct_no,trans_dt,bill_cycle_yr_mo_no,bill_usd_am,bill_dt_yr_no,cstone_last_updatetm,rec_sta,se_maj_ind_nm,se_indus_ds_tx
+ENT2,023018419,11-JUL-21,333,5598,37499623223,00,9492946884,08-JUL-21,202107,806.05,2021,2025-01-01 12:00:00 UTC,ACTIVE,RETAIL,MULTIPLE
+ENT3,023018420,12-JUL-21,334,5599,37499623224,00,9492946885,08-JUL-21,202107,1200.00,2021,2025-01-02 09:00:00 UTC,ACTIVE,RETAIL,MULTIPLE
+
+[gcp_merchant_main]
+se_no,gen_mjr_indus_cd,se_maj_ind_nm,se_indus_ds_tx,cntry_nm
+9492946884,11,RETAIL,MULTIPLE,CHILE
+9492946885,11,RETAIL,MULTIPLE,CHILE
+
+[rdt_cf_retail]
+ctry_nm,rgn_nm,area_type,ds_in,se_indus_ds,exiobase_act,exiobase_cd,in_val,air_trvl_yr
+CHILE,SOUTH AMERICA,COUNTRY,EXIOBASE_CODE,MULTIPLE,ACT_MULTI,EXIO_MULTI1,,
+CHILE,SOUTH AMERICA,COUNTRY,CO2E EMISSIONS (KGCO2E/USD),,,EXIO_MULTI1,2.0,2021
