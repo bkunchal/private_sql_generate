@@ -1,5 +1,6 @@
 import unittest
 import os
+import sqlglot
 
 class ETLTestCases(unittest.TestCase):
     spark = None
@@ -94,28 +95,79 @@ class ETLTestCases(unittest.TestCase):
         This ensures that views are accessible when test cases run.
         """
         for sql_var, view_name in cls.sql_variables.items():
-            query = getattr(cls.module_to_test, sql_var, None)
-            assert query, f"SQL variable '{sql_var}' not found in the PySpark module."
+            original_query = getattr(cls.module_to_test, sql_var, None)
+            assert original_query, f"SQL variable '{sql_var}' not found in the PySpark module."
+
+            # 1) Convert from BigQuery SQL to Spark SQL via SQLGlot
+            converted_query = cls.bigquery_to_spark(original_query)
 
             try:
-                cls.logger.info(f"Preloading SQL query '{sql_var}': {query}")
-                df = cls.spark.sql(query)
-                df.createOrReplaceTempView(view_name)  # Creating temp views before tests run
+                cls.logger.info(f"Preloading SQL query '{sql_var}':\n"
+                                f"--- Original (BigQuery) ---\n{original_query}\n"
+                                f"--- Converted (Spark) ----\n{converted_query}\n")
+
+                # 2) Validate Spark syntax
+                cls.validate_sql_syntax(converted_query)
+
+                # 3) Execute the converted query
+                df = cls.spark.sql(converted_query)
+                df.createOrReplaceTempView(view_name)
                 cls.logger.info(f"Preloaded view '{view_name}' successfully.")
             except Exception as e:
                 raise RuntimeError(f"Failed to preload SQL view '{view_name}': {e}")
+
+    @classmethod
+    def bigquery_to_spark(cls, query: str) -> str:
+        """
+        Converts a BigQuery SQL query into Spark SQL using SQLGlot.
+        If the conversion fails, we return the original query or raise an error.
+        """
+        try:
+            # transpile returns a list of strings (usually just 1)
+            spark_sql_list = sqlglot.transpile(query, read='bigquery', write='spark')
+            if spark_sql_list:
+                return spark_sql_list[0]
+            # If no result, fallback to original
+            cls.logger.warning("SQLGlot returned an empty result, using original query.")
+            return query
+        except Exception as e:
+            cls.logger.warning(f"SQLGlot failed to convert query:\n{query}\nError: {e}")
+            # Optionally, you can raise an exception or just return the original
+            return query
+
+    @classmethod
+    def validate_sql_syntax(cls, query):
+        """
+        Validates the SQL syntax by generating its logical plan without execution.
+        """
+        try:
+            cls.spark.sql(query).explain()
+            cls.logger.info("SQL syntax is valid.")
+        except Exception as e:
+            cls.logger.error(f"SQL syntax validation failed: {e}")
+            raise
 
     def test_sql_execution(self):
         """
         Execute SQL queries defined in the PySpark module.
         """
         for sql_var, view_name in self.sql_variables.items():
-            query = getattr(self.module_to_test, sql_var, None)
-            assert query, f"SQL variable '{sql_var}' not found in the PySpark module."
+            original_query = getattr(self.module_to_test, sql_var, None)
+            assert original_query, f"SQL variable '{sql_var}' not found in the PySpark module."
+
+            # 1) Convert from BigQuery SQL to Spark SQL via SQLGlot
+            converted_query = self.bigquery_to_spark(original_query)
 
             try:
-                self.logger.info(f"Executing query for '{sql_var}': {query}")
-                df = self.spark.sql(query)
+                self.logger.info(f"Executing query for '{sql_var}':\n"
+                                 f"--- Original (BigQuery) ---\n{original_query}\n"
+                                 f"--- Converted (Spark) ----\n{converted_query}")
+
+                # 2) Validate Spark syntax
+                self.validate_sql_syntax(converted_query)
+
+                # 3) Execute in Spark
+                df = self.spark.sql(converted_query)
                 df.createOrReplaceTempView(view_name)
                 self.logger.info(f"Temp view '{view_name}' created successfully.")
                 df.show()
