@@ -1,6 +1,7 @@
 import unittest
 import os
-import sqlglot
+import datetime
+from pyspark.sql.types import TimestampType, FloatType
 
 class ETLTestCases(unittest.TestCase):
     spark = None
@@ -12,7 +13,8 @@ class ETLTestCases(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """
-        Set up Spark session, logger, load input data, and create temp views before running tests.
+        Set up Spark session, logger, load input data, register UDFs, 
+        and create temp views before running tests.
         """
         assert cls.spark, "Spark session must be initialized before running tests."
         assert cls.file_paths, "Input file paths must be provided."
@@ -21,6 +23,9 @@ class ETLTestCases(unittest.TestCase):
 
         # Validate file paths
         cls.validate_file_paths()
+
+        # Register BigQuery-like UDFs (current_time, bq_cast, etc.)
+        cls.register_bq_udfs()
 
         # Load sectioned CSV data into Spark temporary views
         cls.load_data()
@@ -37,6 +42,39 @@ class ETLTestCases(unittest.TestCase):
             if not os.path.exists(file_path):
                 raise FileNotFoundError(f"Data file '{file_path}' not found.")
         cls.logger.info("All input files validated successfully.")
+
+    @classmethod
+    def register_bq_udfs(cls):
+        """
+        Registers UDFs that mimic certain BigQuery functions (e.g. current_time, a custom cast).
+        """
+
+        # 1) current_time() -> returns current UTC timestamp
+        def bq_current_time():
+            return datetime.datetime.utcnow()
+
+        cls.spark.udf.register("current_time", bq_current_time, TimestampType())
+
+        # 2) bq_cast(value, target_type) -> safe cast to float or int, returns NULL on failure
+        def bq_cast_udf(value, target_type):
+            """
+            Mimic BigQuery's CAST or SAFE_CAST for FLOAT64 or INT64.
+            Return None (NULL) if parsing fails.
+            """
+            if value is None:
+                return None
+            try:
+                if target_type.upper() in ["FLOAT64", "FLOAT", "DOUBLE"]:
+                    return float(value)
+                elif target_type.upper() in ["INT64", "INT"]:
+                    return int(float(value))  # parse as float, then int
+            except:
+                return None
+            return None
+
+        cls.spark.udf.register("bq_cast", bq_cast_udf, FloatType())
+
+        cls.logger.info("Registered BigQuery-like UDFs: current_time(), bq_cast()")
 
     @classmethod
     def load_data(cls):
@@ -98,42 +136,16 @@ class ETLTestCases(unittest.TestCase):
             original_query = getattr(cls.module_to_test, sql_var, None)
             assert original_query, f"SQL variable '{sql_var}' not found in the PySpark module."
 
-            # 1) Convert from BigQuery SQL to Spark SQL via SQLGlot
-            converted_query = cls.bigquery_to_spark(original_query)
+            cls.logger.info(f"Preloading SQL query '{sql_var}':\n{original_query}\n")
+            # Validate Spark syntax before execution
+            cls.validate_sql_syntax(original_query)
 
             try:
-                cls.logger.info(f"Preloading SQL query '{sql_var}':\n"
-                                f"--- Original (BigQuery) ---\n{original_query}\n"
-                                f"--- Converted (Spark) ----\n{converted_query}\n")
-
-                # 2) Validate Spark syntax
-                cls.validate_sql_syntax(converted_query)
-
-                # 3) Execute the converted query
-                df = cls.spark.sql(converted_query)
+                df = cls.spark.sql(original_query)
                 df.createOrReplaceTempView(view_name)
                 cls.logger.info(f"Preloaded view '{view_name}' successfully.")
             except Exception as e:
                 raise RuntimeError(f"Failed to preload SQL view '{view_name}': {e}")
-
-    @classmethod
-    def bigquery_to_spark(cls, query: str) -> str:
-        """
-        Converts a BigQuery SQL query into Spark SQL using SQLGlot.
-        If the conversion fails, we return the original query or raise an error.
-        """
-        try:
-            # transpile returns a list of strings (usually just 1)
-            spark_sql_list = sqlglot.transpile(query, read='bigquery', write='spark')
-            if spark_sql_list:
-                return spark_sql_list[0]
-            # If no result, fallback to original
-            cls.logger.warning("SQLGlot returned an empty result, using original query.")
-            return query
-        except Exception as e:
-            cls.logger.warning(f"SQLGlot failed to convert query:\n{query}\nError: {e}")
-            # Optionally, you can raise an exception or just return the original
-            return query
 
     @classmethod
     def validate_sql_syntax(cls, query):
@@ -155,19 +167,12 @@ class ETLTestCases(unittest.TestCase):
             original_query = getattr(self.module_to_test, sql_var, None)
             assert original_query, f"SQL variable '{sql_var}' not found in the PySpark module."
 
-            # 1) Convert from BigQuery SQL to Spark SQL via SQLGlot
-            converted_query = self.bigquery_to_spark(original_query)
+            self.logger.info(f"Executing query for '{sql_var}':\n{original_query}\n")
+            # Validate Spark syntax before execution
+            self.validate_sql_syntax(original_query)
 
             try:
-                self.logger.info(f"Executing query for '{sql_var}':\n"
-                                 f"--- Original (BigQuery) ---\n{original_query}\n"
-                                 f"--- Converted (Spark) ----\n{converted_query}")
-
-                # 2) Validate Spark syntax
-                self.validate_sql_syntax(converted_query)
-
-                # 3) Execute in Spark
-                df = self.spark.sql(converted_query)
+                df = self.spark.sql(original_query)
                 df.createOrReplaceTempView(view_name)
                 self.logger.info(f"Temp view '{view_name}' created successfully.")
                 df.show()
