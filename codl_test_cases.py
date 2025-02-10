@@ -24,7 +24,7 @@ class ETLTestCases(unittest.TestCase):
         # Validate file paths
         cls.validate_file_paths()
 
-        # Register BigQuery-like UDFs (current_time, bq_cast, etc.)
+        # Register BigQuery-like UDFs (in this version we still register bq_cast)
         cls.register_bq_udfs()
 
         # Load sectioned CSV data into Spark temporary views
@@ -46,16 +46,11 @@ class ETLTestCases(unittest.TestCase):
     @classmethod
     def register_bq_udfs(cls):
         """
-        Registers UDFs that mimic certain BigQuery functions (e.g. current_time, a custom cast).
+        Registers UDFs that mimic certain BigQuery functions (e.g. bq_cast).
+        Note: CURRENT_TIME() is handled by string replacement.
         """
 
-        # 1) current_time() -> returns current UTC timestamp
-        def bq_current_time():
-            return datetime.datetime.utcnow()
-
-        cls.spark.udf.register("current_time", bq_current_time, TimestampType())
-
-        # 2) bq_cast(value, target_type) -> safe cast to float or int, returns NULL on failure
+        # bq_cast(value, target_type) -> safe cast to float or int, returns NULL on failure
         def bq_cast_udf(value, target_type):
             """
             Mimic BigQuery's CAST or SAFE_CAST for FLOAT64 or INT64.
@@ -74,7 +69,29 @@ class ETLTestCases(unittest.TestCase):
 
         cls.spark.udf.register("bq_cast", bq_cast_udf, FloatType())
 
-        cls.logger.info("Registered BigQuery-like UDFs: current_time(), bq_cast()")
+        cls.logger.info("Registered BigQuery-like UDF: bq_cast()")
+
+    @classmethod
+    def replace_bq_types_for_spark(cls, query: str) -> str:
+        """
+        Replaces BigQuery-specific types and functions with Spark-friendly equivalents.
+        - INT64         -> BIGINT
+        - FLOAT64       -> DOUBLE
+        - NUMERIC       -> DECIMAL(38,9)
+        - BIGNUMERIC    -> DECIMAL(38,9)
+        - TIME          -> STRING
+        - DATETIME      -> TIMESTAMP
+        - CURRENT_TIME() -> date_format(current_timestamp(), 'HH:mm:ss')
+        """
+        new_query = query
+        new_query = new_query.replace("INT64", "BIGINT")
+        new_query = new_query.replace("FLOAT64", "DOUBLE")
+        new_query = new_query.replace("BIGNUMERIC", "DECIMAL(38,9)")
+        new_query = new_query.replace("NUMERIC", "DECIMAL(38,9)")
+        new_query = new_query.replace("TIME", "STRING")
+        new_query = new_query.replace("DATETIME", "TIMESTAMP")
+        new_query = new_query.replace("CURRENT_TIME()", "date_format(current_timestamp(), 'HH:mm:ss')")
+        return new_query
 
     @classmethod
     def load_data(cls):
@@ -96,7 +113,6 @@ class ETLTestCases(unittest.TestCase):
                         if current_table and table_data:
                             cls.create_temp_view(current_table, table_data)
                             table_data = []
-
                         current_table = line.strip("[]")  # Extract the table name
                     elif current_table and line:
                         table_data.append(line)
@@ -119,7 +135,6 @@ class ETLTestCases(unittest.TestCase):
             data = [row.split(",") for row in table_data[1:]]  # Remaining rows as data
             df = cls.spark.createDataFrame(data, schema=headers)
             df.createOrReplaceTempView(table_name)
-
             cls.logger.info(f"Temp view '{table_name}' created successfully.")
             df.show()  # Debugging purposes
         except Exception as e:
@@ -136,12 +151,17 @@ class ETLTestCases(unittest.TestCase):
             original_query = getattr(cls.module_to_test, sql_var, None)
             assert original_query, f"SQL variable '{sql_var}' not found in the PySpark module."
 
-            cls.logger.info(f"Preloading SQL query '{sql_var}':\n{original_query}\n")
+            # Replace BigQuery-specific types and functions with Spark equivalents.
+            fixed_query = cls.replace_bq_types_for_spark(original_query)
+
+            cls.logger.info(f"Preloading SQL query '{sql_var}':\n"
+                            f"--- Original (BigQuery) ---\n{original_query}\n"
+                            f"--- After Replacement ---\n{fixed_query}\n")
             # Validate Spark syntax before execution
-            cls.validate_sql_syntax(original_query)
+            cls.validate_sql_syntax(fixed_query)
 
             try:
-                df = cls.spark.sql(original_query)
+                df = cls.spark.sql(fixed_query)
                 df.createOrReplaceTempView(view_name)
                 cls.logger.info(f"Preloaded view '{view_name}' successfully.")
             except Exception as e:
@@ -167,12 +187,17 @@ class ETLTestCases(unittest.TestCase):
             original_query = getattr(self.module_to_test, sql_var, None)
             assert original_query, f"SQL variable '{sql_var}' not found in the PySpark module."
 
-            self.logger.info(f"Executing query for '{sql_var}':\n{original_query}\n")
+            # Replace BigQuery-specific types and functions with Spark equivalents.
+            fixed_query = self.replace_bq_types_for_spark(original_query)
+
+            self.logger.info(f"Executing query for '{sql_var}':\n"
+                             f"--- Original (BigQuery) ---\n{original_query}\n"
+                             f"--- After Replacement ---\n{fixed_query}\n")
             # Validate Spark syntax before execution
-            self.validate_sql_syntax(original_query)
+            self.validate_sql_syntax(fixed_query)
 
             try:
-                df = self.spark.sql(original_query)
+                df = self.spark.sql(fixed_query)
                 df.createOrReplaceTempView(view_name)
                 self.logger.info(f"Temp view '{view_name}' created successfully.")
                 df.show()
