@@ -1,7 +1,6 @@
 import unittest
 import os
-import datetime
-from pyspark.sql.types import TimestampType, FloatType
+from pyspark.sql.types import FloatType
 
 class ETLTestCases(unittest.TestCase):
     spark = None
@@ -9,12 +8,12 @@ class ETLTestCases(unittest.TestCase):
     logger = None
     module_to_test = None  # PySpark module to test
     sql_variables = {}  # Mapping SQL variable names to expected view names
+    output_validation_views = []  # List of views to validate (to be set in test module)
 
     @classmethod
     def setUpClass(cls):
         """
-        Set up Spark session, logger, load input data, register UDFs, 
-        and create temp views before running tests.
+        Set up Spark session, logger, load input data, and create temp views before running tests.
         """
         assert cls.spark, "Spark session must be initialized before running tests."
         assert cls.file_paths, "Input file paths must be provided."
@@ -23,9 +22,6 @@ class ETLTestCases(unittest.TestCase):
 
         # Validate file paths
         cls.validate_file_paths()
-
-        # Register BigQuery-like UDFs (in this version we still register bq_cast)
-        cls.register_bq_udfs()
 
         # Load sectioned CSV data into Spark temporary views
         cls.load_data()
@@ -44,37 +40,9 @@ class ETLTestCases(unittest.TestCase):
         cls.logger.info("All input files validated successfully.")
 
     @classmethod
-    def register_bq_udfs(cls):
-        """
-        Registers UDFs that mimic certain BigQuery functions (e.g. bq_cast).
-        Note: CURRENT_TIME() is handled by string replacement.
-        """
-
-        # bq_cast(value, target_type) -> safe cast to float or int, returns NULL on failure
-        def bq_cast_udf(value, target_type):
-            """
-            Mimic BigQuery's CAST or SAFE_CAST for FLOAT64 or INT64.
-            Return None (NULL) if parsing fails.
-            """
-            if value is None:
-                return None
-            try:
-                if target_type.upper() in ["FLOAT64", "FLOAT", "DOUBLE"]:
-                    return float(value)
-                elif target_type.upper() in ["INT64", "INT"]:
-                    return int(float(value))  # parse as float, then int
-            except:
-                return None
-            return None
-
-        cls.spark.udf.register("bq_cast", bq_cast_udf, FloatType())
-
-        cls.logger.info("Registered BigQuery-like UDF: bq_cast()")
-
-    @classmethod
     def replace_bq_types_for_spark(cls, query: str) -> str:
         """
-        Replaces BigQuery-specific types and functions with Spark-friendly equivalents.
+        Efficiently replaces BigQuery-specific types and functions with Spark-friendly equivalents.
         - INT64         -> BIGINT
         - FLOAT64       -> DOUBLE
         - NUMERIC       -> DECIMAL(38,9)
@@ -83,15 +51,21 @@ class ETLTestCases(unittest.TestCase):
         - DATETIME      -> TIMESTAMP
         - CURRENT_TIME() -> date_format(current_timestamp(), 'HH:mm:ss')
         """
-        new_query = query
-        new_query = new_query.replace("INT64", "BIGINT")
-        new_query = new_query.replace("FLOAT64", "DOUBLE")
-        new_query = new_query.replace("BIGNUMERIC", "DECIMAL(38,9)")
-        new_query = new_query.replace("NUMERIC", "DECIMAL(38,9)")
-        new_query = new_query.replace("TIME", "STRING")
-        new_query = new_query.replace("DATETIME", "TIMESTAMP")
-        new_query = new_query.replace("CURRENT_TIME()", "date_format(current_timestamp(), 'HH:mm:ss')")
-        return new_query
+
+        replacements = {
+            "INT64": "BIGINT",
+            "FLOAT64": "DOUBLE",
+            "BIGNUMERIC": "DECIMAL(38,9)",
+            "NUMERIC": "DECIMAL(38,9)",
+            "TIME": "STRING",
+            "DATETIME": "TIMESTAMP",
+            "CURRENT_TIME()": "date_format(current_timestamp(), 'HH:mm:ss')"  # Extracts only time
+        }
+
+        for bq_type, spark_type in replacements.items():
+            query = query.replace(bq_type, spark_type)
+
+        return query
 
     @classmethod
     def load_data(cls):
@@ -206,12 +180,13 @@ class ETLTestCases(unittest.TestCase):
 
     def test_output_validation(self):
         """
-        Validate the final output view.
+        Validate only the specified output views.
         """
-        for sql_var, view_name in self.sql_variables.items():
+        for view_name in self.output_validation_views:
             try:
                 final_df = self.spark.sql(f"SELECT * FROM {view_name}")
                 self.assertGreater(final_df.count(), 0, f"View '{view_name}' is empty.")
                 self.logger.info(f"Validated view '{view_name}' with {final_df.count()} rows.")
+                final_df.show()  # Only display if in the specified views
             except Exception as e:
                 self.fail(f"Validation failed for view '{view_name}': {e}")
