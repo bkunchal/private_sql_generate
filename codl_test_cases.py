@@ -1,5 +1,6 @@
 import unittest
 import os
+import re
 from pyspark.sql.types import FloatType
 
 class ETLTestCases(unittest.TestCase):
@@ -42,29 +43,26 @@ class ETLTestCases(unittest.TestCase):
     @classmethod
     def replace_bq_types_for_spark(cls, query: str) -> str:
         """
-        Efficiently replaces BigQuery-specific types and functions with Spark-friendly equivalents.
-        - INT64         -> BIGINT
-        - FLOAT64       -> DOUBLE
-        - NUMERIC       -> DECIMAL(38,9)
-        - BIGNUMERIC    -> DECIMAL(38,9)
-        - TIME          -> STRING
-        - DATETIME      -> TIMESTAMP
+        Replaces BigQuery-specific types and functions with Spark-friendly equivalents.
         - CURRENT_TIME() -> date_format(current_timestamp(), 'HH:mm:ss')
+        - Ensures proper replacements and avoids double replacements.
         """
-
+    
+        # Define the mappings between BigQuery and Spark SQL types
         replacements = {
-            "INT64": "BIGINT",
-            "FLOAT64": "DOUBLE",
-            "BIGNUMERIC": "DECIMAL(38,9)",
-            "NUMERIC": "DECIMAL(38,9)",
-            "TIME": "STRING",
-            "DATETIME": "TIMESTAMP",
-            "CURRENT_TIME()": "date_format(current_timestamp(), 'HH:mm:ss')"  # Extracts only time
+            r'(?i)\bCURRENT_TIME\(\)': "date_format(current_timestamp(), 'HH:mm:ss')",  # Proper conversion
+            r'(?i)\bINT64\b': "BIGINT",
+            r'(?i)\bFLOAT64\b': "DOUBLE",
+            r'(?i)\bBIGNUMERIC\b': "DECIMAL(38,9)",
+            r'(?i)\bNUMERIC\b': "DECIMAL(38,9)",
+            r'(?i)\bTIME\b': "STRING",
+            r'(?i)\bDATETIME\b': "TIMESTAMP"
         }
-
-        for bq_type, spark_type in replacements.items():
-            query = query.replace(bq_type, spark_type)
-
+    
+        # Apply replacements using regex to prevent incorrect substring modifications
+        for pattern, replacement in replacements.items():
+            query = re.sub(pattern, replacement, query)
+    
         return query
 
     @classmethod
